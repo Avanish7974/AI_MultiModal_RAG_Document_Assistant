@@ -1,0 +1,76 @@
+# =========================================================
+# Multi-Modal RAG Document Assistant
+# Python: 3.13+
+# =========================================================
+
+# -------------------------
+# Streamlit (current app)
+# -------------------------
+streamlit
+
+# -------------------------
+# FastAPI (new frontend/backend)
+# -------------------------
+fastapi
+uvicorn
+python-multipart
+
+# -------------------------
+# Environment / Configuration
+# -------------------------
+python-dotenv
+
+# -------------------------
+# Google Gemini
+# -------------------------
+google-genai
+
+# -------------------------
+# Vector Database
+# -------------------------
+chromadb
+
+# -------------------------
+# Embeddings / NLP
+# -------------------------
+sentence-transformers
+transformers
+huggingface-hub
+tqdm
+regex
+
+# -------------------------
+# Document Processing
+# -------------------------
+pypdf
+PyMuPDF
+python-docx
+python-pptx
+pandas
+openpyxl
+XlsxWriter
+
+# -------------------------
+# Image / OCR
+# -------------------------
+easyocr
+Pillow
+opencv-python-headless
+
+# -------------------------
+# YouTube
+# -------------------------
+youtube-transcript-api
+yt-dlp
+
+# -------------------------
+# YouTube Whisper fallback
+# -------------------------
+faster-whisper
+
+# -------------------------
+# Existing / supporting libraries
+# -------------------------
+numpy
+scipy
+scikit-learn
