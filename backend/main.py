@@ -12,6 +12,8 @@ from src.services.chat_manager import (
     delete_chat,
     get_messages,
     save_message,
+    update_chat_title,
+    get_chat_files,
 )
 
 from src.vectorstore.chroma_store import get_chat_collection
@@ -35,17 +37,13 @@ app = FastAPI(
 # CORS
 # =========================================================
 
-# =========================================================
-# CORS
-# =========================================================
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://127.0.0.1:5500",
         "http://localhost:5500",
 
-        # Current frontend origin shown in browser console
+        # Streamlit
         "http://localhost:8501",
         "http://127.0.0.1:8501",
     ],
@@ -53,6 +51,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # =========================================================
 # REQUEST MODELS
@@ -67,12 +66,17 @@ class AskRequest(BaseModel):
     question: str
 
 
+class ChatUpdateRequest(BaseModel):
+    title: str
+
+
 # =========================================================
 # ROOT
 # =========================================================
 
 @app.get("/")
 def root():
+
     return {
         "message": "Multi-Modal RAG API is running",
         "status": "ok",
@@ -85,8 +89,9 @@ def root():
 
 @app.get("/api/health")
 def health_check():
+
     return {
-        "status": "healthy"
+        "status": "healthy",
     }
 
 
@@ -100,7 +105,7 @@ def get_all_chats():
     chats = list_chats()
 
     return {
-        "chats": chats
+        "chats": chats,
     }
 
 
@@ -114,7 +119,7 @@ def create_new_chat():
     chat_id = create_chat()
 
     return {
-        "chat_id": chat_id
+        "chat_id": chat_id,
     }
 
 
@@ -123,17 +128,89 @@ def create_new_chat():
 # =========================================================
 
 @app.get("/api/chats/{chat_id}")
-def get_single_chat(chat_id: str):
+def get_single_chat(
+    chat_id: str
+):
 
-    chat = get_chat(chat_id)
+    chat = get_chat(
+        chat_id
+    )
 
     if not chat:
+
         raise HTTPException(
             status_code=404,
-            detail="Chat not found"
+            detail="Chat not found",
         )
 
     return chat
+
+
+# =========================================================
+# UPDATE CHAT TITLE
+# =========================================================
+
+@app.patch("/api/chats/{chat_id}")
+def update_chat(
+    chat_id: str,
+    request: ChatUpdateRequest,
+):
+
+    # -----------------------------------------------------
+    # CHECK CHAT
+    # -----------------------------------------------------
+
+    chat = get_chat(
+        chat_id
+    )
+
+    if not chat:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Chat not found",
+        )
+
+    # -----------------------------------------------------
+    # VALIDATE TITLE
+    # -----------------------------------------------------
+
+    title = request.title.strip()
+
+    if not title:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Chat title cannot be empty",
+        )
+
+    # -----------------------------------------------------
+    # LIMIT TITLE LENGTH
+    # -----------------------------------------------------
+
+    title = title[:100]
+
+    # -----------------------------------------------------
+    # UPDATE TITLE
+    # -----------------------------------------------------
+
+    update_chat_title(
+        chat_id,
+        title,
+    )
+
+    # -----------------------------------------------------
+    # GET UPDATED CHAT
+    # -----------------------------------------------------
+
+    updated_chat = get_chat(
+        chat_id
+    )
+
+    return {
+        "success": True,
+        "chat": updated_chat,
+    }
 
 
 # =========================================================
@@ -141,21 +218,67 @@ def get_single_chat(chat_id: str):
 # =========================================================
 
 @app.delete("/api/chats/{chat_id}")
-def remove_chat(chat_id: str):
+def remove_chat(
+    chat_id: str
+):
 
-    chat = get_chat(chat_id)
+    chat = get_chat(
+        chat_id
+    )
 
     if not chat:
+
         raise HTTPException(
             status_code=404,
-            detail="Chat not found"
+            detail="Chat not found",
         )
 
-    delete_chat(chat_id)
+    delete_chat(
+        chat_id
+    )
 
     return {
         "success": True,
-        "chat_id": chat_id
+        "chat_id": chat_id,
+    }
+
+
+# =========================================================
+# GET CHAT FILES
+# =========================================================
+
+@app.get("/api/chats/{chat_id}/files")
+def get_files_for_chat(
+    chat_id: str
+):
+
+    # -----------------------------------------------------
+    # CHECK CHAT
+    # -----------------------------------------------------
+
+    chat = get_chat(
+        chat_id
+    )
+
+    if not chat:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Chat not found",
+        )
+
+    # -----------------------------------------------------
+    # GET FILES
+    # -----------------------------------------------------
+
+    files = get_chat_files(
+        chat_id
+    )
+
+    return {
+        "success": True,
+        "chat_id": chat_id,
+        "files": files,
     }
 
 
@@ -164,21 +287,28 @@ def remove_chat(chat_id: str):
 # =========================================================
 
 @app.get("/api/chats/{chat_id}/messages")
-def get_chat_messages(chat_id: str):
+def get_chat_messages(
+    chat_id: str
+):
 
-    chat = get_chat(chat_id)
+    chat = get_chat(
+        chat_id
+    )
 
     if not chat:
+
         raise HTTPException(
             status_code=404,
-            detail="Chat not found"
+            detail="Chat not found",
         )
 
-    messages = get_messages(chat_id)
+    messages = get_messages(
+        chat_id
+    )
 
     return {
         "chat_id": chat_id,
-        "messages": messages
+        "messages": messages,
     }
 
 
@@ -189,15 +319,18 @@ def get_chat_messages(chat_id: str):
 @app.post("/api/chats/{chat_id}/messages")
 def add_chat_message(
     chat_id: str,
-    request: MessageRequest
+    request: MessageRequest,
 ):
 
-    chat = get_chat(chat_id)
+    chat = get_chat(
+        chat_id
+    )
 
     if not chat:
+
         raise HTTPException(
             status_code=404,
-            detail="Chat not found"
+            detail="Chat not found",
         )
 
     message = {
@@ -207,7 +340,7 @@ def add_chat_message(
 
     save_message(
         chat_id,
-        message
+        message,
     )
 
     return {
@@ -216,6 +349,7 @@ def add_chat_message(
         "message": message,
     }
 
+
 # =========================================================
 # UPLOAD DOCUMENT
 # =========================================================
@@ -223,19 +357,22 @@ def add_chat_message(
 @app.post("/api/chats/{chat_id}/upload")
 async def upload_document(
     chat_id: str,
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
 ):
 
     # -----------------------------------------------------
     # CHECK CHAT
     # -----------------------------------------------------
 
-    chat = get_chat(chat_id)
+    chat = get_chat(
+        chat_id
+    )
 
     if not chat:
+
         raise HTTPException(
             status_code=404,
-            detail="Chat not found"
+            detail="Chat not found",
         )
 
     # -----------------------------------------------------
@@ -243,16 +380,19 @@ async def upload_document(
     # -----------------------------------------------------
 
     if not file.filename:
+
         raise HTTPException(
             status_code=400,
-            detail="No file selected"
+            detail="No file selected",
         )
 
     # -----------------------------------------------------
     # GET CHAT COLLECTION
     # -----------------------------------------------------
 
-    collection = get_chat_collection(chat_id)
+    collection = get_chat_collection(
+        chat_id
+    )
 
     # -----------------------------------------------------
     # SAVE FILE TEMPORARILY
@@ -268,14 +408,16 @@ async def upload_document(
 
         with tempfile.NamedTemporaryFile(
             delete=False,
-            suffix=suffix
+            suffix=suffix,
         ) as temp_file:
 
             temp_path = temp_file.name
 
             content = await file.read()
 
-            temp_file.write(content)
+            temp_file.write(
+                content
+            )
 
         # -------------------------------------------------
         # PROCESS DOCUMENT
@@ -284,7 +426,7 @@ async def upload_document(
         chunks = process_document(
             file_path=temp_path,
             file_name=file.filename,
-            collection=collection
+            collection=collection,
         )
 
         # -------------------------------------------------
@@ -295,7 +437,10 @@ async def upload_document(
 
             raise HTTPException(
                 status_code=400,
-                detail="Could not extract any content from the document."
+                detail=(
+                    "Could not extract any content "
+                    "from the document."
+                ),
             )
 
         # -------------------------------------------------
@@ -307,24 +452,30 @@ async def upload_document(
             "chat_id": chat_id,
             "file_name": file.filename,
             "chunks": len(chunks),
-            "message": "Document uploaded and processed successfully."
+            "message": (
+                "Document uploaded and processed "
+                "successfully."
+            ),
         }
 
     except HTTPException:
+
         raise
 
     except ValueError as e:
 
         raise HTTPException(
             status_code=400,
-            detail=str(e)
+            detail=str(e),
         )
 
     except Exception as e:
 
         raise HTTPException(
             status_code=500,
-            detail=f"Document processing failed: {str(e)}"
+            detail=(
+                f"Document processing failed: {str(e)}"
+            ),
         )
 
     finally:
@@ -333,12 +484,21 @@ async def upload_document(
         # DELETE TEMPORARY FILE
         # -------------------------------------------------
 
-        if temp_path and os.path.exists(temp_path):
+        if (
+            temp_path
+            and os.path.exists(temp_path)
+        ):
 
             try:
-                os.remove(temp_path)
+
+                os.remove(
+                    temp_path
+                )
+
             except Exception:
+
                 pass
+
 
 # =========================================================
 # ASK DOCUMENTS — RAG
@@ -347,19 +507,22 @@ async def upload_document(
 @app.post("/api/chats/{chat_id}/ask")
 def ask_documents(
     chat_id: str,
-    request: AskRequest
+    request: AskRequest,
 ):
 
     # -----------------------------------------------------
     # CHECK CHAT
     # -----------------------------------------------------
 
-    chat = get_chat(chat_id)
+    chat = get_chat(
+        chat_id
+    )
 
     if not chat:
+
         raise HTTPException(
             status_code=404,
-            detail="Chat not found"
+            detail="Chat not found",
         )
 
     # -----------------------------------------------------
@@ -369,16 +532,19 @@ def ask_documents(
     question = request.question.strip()
 
     if not question:
+
         raise HTTPException(
             status_code=400,
-            detail="Question cannot be empty"
+            detail="Question cannot be empty",
         )
 
     # -----------------------------------------------------
     # GET CHAT-SPECIFIC CHROMA COLLECTION
     # -----------------------------------------------------
 
-    collection = get_chat_collection(chat_id)
+    collection = get_chat_collection(
+        chat_id
+    )
 
     # -----------------------------------------------------
     # CHECK WHETHER DOCUMENTS EXIST
@@ -387,9 +553,13 @@ def ask_documents(
     results = collection.get()
 
     if not results.get("ids"):
+
         raise HTTPException(
             status_code=400,
-            detail="No documents found in this chat. Please upload a document first."
+            detail=(
+                "No documents found in this chat. "
+                "Please upload a document first."
+            ),
         )
 
     # -----------------------------------------------------
@@ -403,7 +573,7 @@ def ask_documents(
 
     save_message(
         chat_id,
-        user_message
+        user_message,
     )
 
     # -----------------------------------------------------
@@ -415,24 +585,26 @@ def ask_documents(
         retrieval_result = retrieve_chunks(
             question,
             collection,
-            top_k=5
+            top_k=5,
         )
 
     except Exception as e:
 
         raise HTTPException(
             status_code=500,
-            detail=f"Document retrieval failed: {str(e)}"
+            detail=(
+                f"Document retrieval failed: {str(e)}"
+            ),
         )
 
     documents = retrieval_result.get(
         "documents",
-        []
+        [],
     )
 
     metadatas = retrieval_result.get(
         "metadatas",
-        []
+        [],
     )
 
     # -----------------------------------------------------
@@ -449,12 +621,12 @@ def ask_documents(
         assistant_message = {
             "role": "assistant",
             "content": answer,
-            "sources": []
+            "sources": [],
         }
 
         save_message(
             chat_id,
-            assistant_message
+            assistant_message,
         )
 
         return {
@@ -473,7 +645,7 @@ def ask_documents(
 
     for i, document in enumerate(
         documents,
-        start=1
+        start=1,
     ):
 
         metadata = (
@@ -484,15 +656,15 @@ def ask_documents(
 
         file_name = metadata.get(
             "file_name",
-            "Unknown file"
+            "Unknown file",
         )
 
         page = metadata.get(
             "page",
             metadata.get(
                 "page_number",
-                "Unknown"
-            )
+                "Unknown",
+            ),
         )
 
         context_parts.append(
@@ -526,19 +698,20 @@ Content:
 
         role = message.get(
             "role",
-            ""
+            "",
         )
 
         content = message.get(
             "content",
-            ""
+            "",
         )
 
-        # Don't include the current question twice
+        # Don't include current question twice
         if (
             role == "user"
             and content == question
         ):
+
             continue
 
         if role == "user":
@@ -580,14 +753,16 @@ RETRIEVED DOCUMENT CONTEXT:
 
         answer = generate_response(
             context=final_context,
-            question=question
+            question=question,
         )
 
     except Exception as e:
 
         raise HTTPException(
             status_code=500,
-            detail=f"Answer generation failed: {str(e)}"
+            detail=(
+                f"Answer generation failed: {str(e)}"
+            ),
         )
 
     # -----------------------------------------------------
@@ -600,25 +775,26 @@ RETRIEVED DOCUMENT CONTEXT:
 
         if not isinstance(
             metadata,
-            dict
+            dict,
         ):
+
             continue
 
         file_name = metadata.get(
             "file_name",
-            "Unknown file"
+            "Unknown file",
         )
 
         source_type = metadata.get(
             "source_type",
-            "document"
+            "document",
         )
 
         page = metadata.get(
             "page",
             metadata.get(
                 "page_number"
-            )
+            ),
         )
 
         if file_name not in grouped_sources:
@@ -641,7 +817,10 @@ RETRIEVED DOCUMENT CONTEXT:
                 str(page)
             )
 
-        # YouTube support
+        # -------------------------------------------------
+        # YOUTUBE SUPPORT
+        # -------------------------------------------------
+
         if source_type == "youtube":
 
             start_time = metadata.get(
@@ -660,11 +839,14 @@ RETRIEVED DOCUMENT CONTEXT:
 
                 except (
                     TypeError,
-                    ValueError
+                    ValueError,
                 ):
+
                     pass
 
-            if metadata.get("video_id"):
+            if metadata.get(
+                "video_id"
+            ):
 
                 grouped_sources[
                     file_name
@@ -692,8 +874,14 @@ RETRIEVED DOCUMENT CONTEXT:
             ),
         }
 
-        # Add YouTube metadata only when applicable
-        if source["source_type"] == "youtube":
+        # -------------------------------------------------
+        # YOUTUBE METADATA
+        # -------------------------------------------------
+
+        if (
+            source["source_type"]
+            == "youtube"
+        ):
 
             formatted_source[
                 "video_id"
@@ -723,7 +911,7 @@ RETRIEVED DOCUMENT CONTEXT:
 
     save_message(
         chat_id,
-        assistant_message
+        assistant_message,
     )
 
     # -----------------------------------------------------

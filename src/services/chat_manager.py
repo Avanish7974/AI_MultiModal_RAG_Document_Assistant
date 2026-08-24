@@ -2,6 +2,7 @@ import os
 import json
 import sqlite3
 import uuid
+
 from datetime import datetime
 
 
@@ -10,6 +11,7 @@ from datetime import datetime
 # =========================================================
 
 DB_DIR = "data"
+
 DB_PATH = os.path.join(
     DB_DIR,
     "chats.db"
@@ -140,6 +142,13 @@ def create_chat(
 
     now = datetime.now().isoformat()
 
+    clean_title = str(
+        title
+    ).strip()
+
+    if not clean_title:
+        clean_title = "New Chat"
+
     connection = _get_connection()
 
     connection.execute(
@@ -154,7 +163,7 @@ def create_chat(
         """,
         (
             chat_id,
-            str(title),
+            clean_title,
             now,
             now
         )
@@ -177,6 +186,9 @@ def get_chat(
     """
     Return one chat.
     """
+
+    if not chat_id:
+        return None
 
     initialize_chat_database()
 
@@ -239,6 +251,74 @@ def list_chats():
 
 
 # =========================================================
+# DEFAULT TITLE CHECK
+# =========================================================
+
+def is_default_chat_title(
+    title
+):
+    """
+    Return True when the chat still has a default title.
+
+    Automatic naming is allowed only while the chat has
+    one of these default titles.
+    """
+
+    if title is None:
+        return True
+
+    normalized = (
+        str(title)
+        .strip()
+        .lower()
+    )
+
+    return normalized in {
+        "",
+        "new chat",
+        "new conversation",
+        "untitled",
+        "untitled chat"
+    }
+
+
+# =========================================================
+# CLEAN CHAT TITLE
+# =========================================================
+
+def clean_chat_title(
+    title,
+    max_length=100
+):
+    """
+    Normalize a chat title before saving it.
+    """
+
+    if title is None:
+        return "New Chat"
+
+    title = str(
+        title
+    ).strip()
+
+    if not title:
+        return "New Chat"
+
+    # Remove duplicate whitespace.
+    title = " ".join(
+        title.split()
+    )
+
+    # Prevent excessively long titles.
+    title = title[:max_length].strip()
+
+    if not title:
+        return "New Chat"
+
+    return title
+
+
+# =========================================================
 # UPDATE CHAT TITLE
 # =========================================================
 
@@ -247,23 +327,27 @@ def update_chat_title(
     title
 ):
     """
-    Update a chat title.
+    Permanently update a chat title in SQLite.
+
+    Returns:
+        True  -> chat existed and was updated
+        False -> chat did not exist
     """
+
+    if not chat_id:
+        return False
 
     initialize_chat_database()
 
-    title = str(
+    title = clean_chat_title(
         title
-    ).strip()
-
-    if not title:
-        title = "New Chat"
+    )
 
     now = datetime.now().isoformat()
 
     connection = _get_connection()
 
-    connection.execute(
+    cursor = connection.execute(
         """
         UPDATE chats
         SET
@@ -280,7 +364,188 @@ def update_chat_title(
 
     connection.commit()
 
+    updated = (
+        cursor.rowcount > 0
+    )
+
     connection.close()
+
+    return updated
+
+
+# =========================================================
+# GENERATE CHAT TITLE FROM QUESTION
+# =========================================================
+
+def generate_chat_title_from_question(
+    question,
+    max_length=60
+):
+    """
+    Generate a simple readable title from the user's first
+    question.
+
+    Example:
+
+        What is cloud computing?
+
+    becomes:
+
+        What is cloud computing
+    """
+
+    if not question:
+        return "New Chat"
+
+    title = str(
+        question
+    ).strip()
+
+    # Normalize whitespace.
+    title = " ".join(
+        title.split()
+    )
+
+    if not title:
+        return "New Chat"
+
+    # -----------------------------------------------------
+    # Remove common conversational prefixes.
+    # -----------------------------------------------------
+
+    prefixes = [
+        "please explain ",
+        "can you explain ",
+        "could you explain ",
+        "can you tell me ",
+        "could you tell me ",
+        "please tell me ",
+        "tell me about ",
+    ]
+
+    lower_title = title.lower()
+
+    for prefix in prefixes:
+
+        if lower_title.startswith(
+            prefix
+        ):
+
+            title = title[
+                len(prefix):
+            ].strip()
+
+            break
+
+    # -----------------------------------------------------
+    # Remove ending punctuation.
+    # -----------------------------------------------------
+
+    title = title.rstrip(
+        ".?!"
+    ).strip()
+
+    if not title:
+        return "New Chat"
+
+    # -----------------------------------------------------
+    # Capitalize first character.
+    # -----------------------------------------------------
+
+    title = (
+        title[0].upper() +
+        title[1:]
+    )
+
+    # -----------------------------------------------------
+    # Limit title length.
+    # -----------------------------------------------------
+
+    if len(title) > max_length:
+
+        title = (
+            title[:max_length - 3]
+            .rstrip()
+            + "..."
+        )
+
+    return title
+
+
+# =========================================================
+# AUTO-NAME CHAT
+# =========================================================
+
+def auto_name_chat(
+    chat_id,
+    question
+):
+    """
+    Automatically name a chat from the first question.
+
+    IMPORTANT:
+
+    If the user has already manually renamed the chat,
+    this function will NOT overwrite that title.
+
+    Returns:
+        The final chat title, or None if chat doesn't exist.
+    """
+
+    if not chat_id:
+        return None
+
+    if not question:
+        return None
+
+    chat = get_chat(
+        chat_id
+    )
+
+    if not chat:
+        return None
+
+    current_title = chat.get(
+        "title",
+        "New Chat"
+    )
+
+    # -----------------------------------------------------
+    # NEVER overwrite an existing custom title.
+    # -----------------------------------------------------
+
+    if not is_default_chat_title(
+        current_title
+    ):
+
+        return current_title
+
+    # -----------------------------------------------------
+    # Generate title.
+    # -----------------------------------------------------
+
+    new_title = (
+        generate_chat_title_from_question(
+            question
+        )
+    )
+
+    if is_default_chat_title(
+        new_title
+    ):
+
+        return current_title
+
+    # -----------------------------------------------------
+    # Save title.
+    # -----------------------------------------------------
+
+    update_chat_title(
+        chat_id,
+        new_title
+    )
+
+    return new_title
 
 
 # =========================================================
@@ -294,13 +559,16 @@ def touch_chat(
     Update the last activity time of a chat.
     """
 
+    if not chat_id:
+        return False
+
     initialize_chat_database()
 
     now = datetime.now().isoformat()
 
     connection = _get_connection()
 
-    connection.execute(
+    cursor = connection.execute(
         """
         UPDATE chats
         SET updated_at = ?
@@ -314,7 +582,13 @@ def touch_chat(
 
     connection.commit()
 
+    updated = (
+        cursor.rowcount > 0
+    )
+
     connection.close()
+
+    return updated
 
 
 # =========================================================
@@ -332,9 +606,23 @@ def save_message(
 
         sources
         analysis_result
+        metadata
 
     are preserved inside message_data.
     """
+
+    if not chat_id:
+        raise ValueError(
+            "chat_id is required"
+        )
+
+    if not isinstance(
+        message,
+        dict
+    ):
+        raise ValueError(
+            "message must be a dictionary"
+        )
 
     initialize_chat_database()
 
@@ -343,7 +631,7 @@ def save_message(
             "role",
             ""
         )
-    )
+    ).strip()
 
     content = str(
         message.get(
@@ -351,6 +639,11 @@ def save_message(
             ""
         )
     )
+
+    if not role:
+        raise ValueError(
+            "message role is required"
+        )
 
     message_data = json.dumps(
         message,
@@ -382,6 +675,10 @@ def save_message(
         )
     )
 
+    # -----------------------------------------------------
+    # Update chat activity.
+    # -----------------------------------------------------
+
     connection.execute(
         """
         UPDATE chats
@@ -410,6 +707,9 @@ def get_messages(
     Load all messages for a chat.
     """
 
+    if not chat_id:
+        return []
+
     initialize_chat_database()
 
     connection = _get_connection()
@@ -435,7 +735,9 @@ def get_messages(
 
     for row in rows:
 
-        raw_data = row["message_data"]
+        raw_data = row[
+            "message_data"
+        ]
 
         if raw_data:
 
@@ -449,6 +751,7 @@ def get_messages(
                     message,
                     dict
                 ):
+
                     messages.append(
                         message
                     )
@@ -459,12 +762,20 @@ def get_messages(
                 json.JSONDecodeError,
                 TypeError
             ):
+
                 pass
+
+        # -------------------------------------------------
+        # Fallback for old messages.
+        # -------------------------------------------------
 
         messages.append(
             {
-                "role": row["role"],
-                "content": row["content"]
+                "role":
+                    row["role"],
+
+                "content":
+                    row["content"]
             }
         )
 
@@ -493,10 +804,15 @@ def add_file(
     is explicitly converted to a normal string.
     """
 
+    if not chat_id:
+        raise ValueError(
+            "chat_id is required"
+        )
+
     initialize_chat_database()
 
     # -----------------------------------------------------
-    # NORMALIZE VALUES BEFORE SQLITE
+    # Normalize values.
     # -----------------------------------------------------
 
     chat_id = str(
@@ -518,6 +834,7 @@ def add_file(
     if file_size is not None:
 
         try:
+
             file_size = int(
                 file_size
             )
@@ -526,10 +843,11 @@ def add_file(
             TypeError,
             ValueError
         ):
+
             file_size = None
 
     # -----------------------------------------------------
-    # INSERT FILE
+    # Insert file.
     # -----------------------------------------------------
 
     connection = _get_connection()
@@ -555,7 +873,7 @@ def add_file(
     )
 
     # -----------------------------------------------------
-    # UPDATE CHAT TIME
+    # Update chat activity.
     # -----------------------------------------------------
 
     connection.execute(
@@ -586,6 +904,9 @@ def get_chat_files(
     Return all files belonging to a chat.
     """
 
+    if not chat_id:
+        return []
+
     initialize_chat_database()
 
     connection = _get_connection()
@@ -593,6 +914,7 @@ def get_chat_files(
     rows = connection.execute(
         """
         SELECT
+            id,
             file_key,
             file_name,
             file_path,
@@ -623,7 +945,14 @@ def delete_chat(
 ):
     """
     Delete a chat and its messages/files metadata.
+
+    Because the database uses ON DELETE CASCADE,
+    associated messages and chat_files records are also
+    removed.
     """
+
+    if not chat_id:
+        return False
 
     initialize_chat_database()
 
@@ -633,7 +962,7 @@ def delete_chat(
         "PRAGMA foreign_keys = ON"
     )
 
-    connection.execute(
+    cursor = connection.execute(
         """
         DELETE FROM chats
         WHERE chat_id = ?
@@ -645,7 +974,13 @@ def delete_chat(
 
     connection.commit()
 
+    deleted = (
+        cursor.rowcount > 0
+    )
+
     connection.close()
+
+    return deleted
 
 
 # =========================================================
@@ -685,6 +1020,9 @@ def chat_exists(
     Return True when a chat exists.
     """
 
+    if not chat_id:
+        return False
+
     initialize_chat_database()
 
     connection = _get_connection()
@@ -704,3 +1042,8 @@ def chat_exists(
     connection.close()
 
     return row is not None
+
+
+# =========================================================
+# END CHAT MANAGER
+# =========================================================

@@ -1,12 +1,15 @@
 // =========================================================
 // MULTI-MODAL RAG DOCUMENT ASSISTANT
 // APP.JS
+// =========================================================
 //
 // IMPORTANT:
+//
 // API functions are provided by api.js
 // Chat state/functions are provided by chats.js
 //
 // DO NOT declare:
+//
 // API_BASE_URL
 // currentChatId
 // createChat
@@ -16,7 +19,8 @@
 // saveChatMessage
 // loadChats
 // getChat
-// openChat
+// selectChat
+//
 // =========================================================
 
 
@@ -25,7 +29,9 @@
 // =========================================================
 
 let currentAction = "ask";
+
 let isUploading = false;
+
 let isAsking = false;
 
 
@@ -34,6 +40,7 @@ let isAsking = false;
 // =========================================================
 
 function $(id) {
+
     return document.getElementById(id);
 }
 
@@ -42,24 +49,39 @@ function $(id) {
 // STATUS MESSAGE
 // =========================================================
 
-function setStatus(message, isError = false) {
+function setStatus(
+    message,
+    isError = false
+) {
 
-    const status = $("statusMessage");
+    const status =
+        $("statusMessage");
+
 
     if (!status) {
-        console.log(message);
+
+        if (message) {
+            console.log(message);
+        }
+
         return;
     }
 
-    status.textContent = message || "";
+
+    status.textContent =
+        message || "";
+
 
     status.classList.toggle(
         "error",
         Boolean(isError)
     );
 
+
     status.style.display =
-        message ? "block" : "none";
+        message
+            ? "block"
+            : "none";
 }
 
 
@@ -72,8 +94,12 @@ function showEmptyState() {
     const emptyState =
         $("emptyState");
 
+
     if (emptyState) {
-        emptyState.classList.remove("hidden");
+
+        emptyState.classList.remove(
+            "hidden"
+        );
     }
 }
 
@@ -83,8 +109,12 @@ function hideEmptyState() {
     const emptyState =
         $("emptyState");
 
+
     if (emptyState) {
-        emptyState.classList.add("hidden");
+
+        emptyState.classList.add(
+            "hidden"
+        );
     }
 }
 
@@ -98,11 +128,15 @@ function clearChatInterface() {
     const container =
         $("chatContainer");
 
+
     if (container) {
+
         container.innerHTML = "";
     }
 
+
     hideSources();
+
     showEmptyState();
 }
 
@@ -114,10 +148,14 @@ function clearChatInterface() {
 function escapeHtml(text) {
 
     const div =
-        document.createElement("div");
+        document.createElement(
+            "div"
+        );
+
 
     div.textContent =
         text || "";
+
 
     return div.innerHTML;
 }
@@ -133,11 +171,15 @@ function formatAnswer(text) {
         return "";
     }
 
+
     let html =
         escapeHtml(text);
 
 
+    // =====================================================
     // H3
+    // =====================================================
+
     html =
         html.replace(
             /^### (.+)$/gm,
@@ -145,7 +187,10 @@ function formatAnswer(text) {
         );
 
 
+    // =====================================================
     // H2
+    // =====================================================
+
     html =
         html.replace(
             /^## (.+)$/gm,
@@ -153,7 +198,10 @@ function formatAnswer(text) {
         );
 
 
+    // =====================================================
     // H1
+    // =====================================================
+
     html =
         html.replace(
             /^# (.+)$/gm,
@@ -161,7 +209,10 @@ function formatAnswer(text) {
         );
 
 
-    // Bold
+    // =====================================================
+    // BOLD
+    // =====================================================
+
     html =
         html.replace(
             /\*\*(.*?)\*\*/g,
@@ -169,7 +220,10 @@ function formatAnswer(text) {
         );
 
 
-    // Inline code
+    // =====================================================
+    // INLINE CODE
+    // =====================================================
+
     html =
         html.replace(
             /`([^`]+)`/g,
@@ -177,7 +231,10 @@ function formatAnswer(text) {
         );
 
 
-    // Bullet points
+    // =====================================================
+    // BULLET POINTS
+    // =====================================================
+
     html =
         html.replace(
             /^[•*-] (.+)$/gm,
@@ -185,15 +242,22 @@ function formatAnswer(text) {
         );
 
 
-    // Group consecutive list items
+    // =====================================================
+    // GROUP LIST ITEMS
+    // =====================================================
+
     html =
         html.replace(
             /(<li>.*?<\/li>\s*)+/gs,
-            match => `<ul>${match}</ul>`
+            match =>
+                `<ul>${match}</ul>`
         );
 
 
-    // New lines
+    // =====================================================
+    // NEW LINES
+    // =====================================================
+
     html =
         html.replace(
             /\n/g,
@@ -216,15 +280,21 @@ function scrollToBottom() {
             ".main-content"
         );
 
+
     if (!main) {
         return;
     }
 
+
     requestAnimationFrame(() => {
 
         main.scrollTo({
-            top: main.scrollHeight,
-            behavior: "smooth"
+
+            top:
+                main.scrollHeight,
+
+            behavior:
+                "smooth"
         });
 
     });
@@ -243,6 +313,7 @@ function renderMessage(
     const container =
         $("chatContainer");
 
+
     if (!container) {
 
         console.warn(
@@ -257,7 +328,10 @@ function renderMessage(
 
 
     const message =
-        document.createElement("div");
+        document.createElement(
+            "div"
+        );
+
 
     message.className =
         `message ${
@@ -267,22 +341,29 @@ function renderMessage(
         }`;
 
 
-    // -----------------------------------------------------
+    // =====================================================
     // HEADER
-    // -----------------------------------------------------
+    // =====================================================
 
     const header =
-        document.createElement("div");
+        document.createElement(
+            "div"
+        );
+
 
     header.className =
         "message-header";
 
 
     const icon =
-        document.createElement("div");
+        document.createElement(
+            "div"
+        );
+
 
     icon.className =
         "message-icon";
+
 
     icon.textContent =
         role === "user"
@@ -291,7 +372,10 @@ function renderMessage(
 
 
     const name =
-        document.createElement("span");
+        document.createElement(
+            "span"
+        );
+
 
     name.textContent =
         role === "user"
@@ -299,29 +383,42 @@ function renderMessage(
             : "RAG Assistant";
 
 
-    header.appendChild(icon);
-    header.appendChild(name);
+    header.appendChild(
+        icon
+    );
+
+    header.appendChild(
+        name
+    );
 
 
-    // -----------------------------------------------------
+    // =====================================================
     // CONTENT
-    // -----------------------------------------------------
+    // =====================================================
 
     const contentElement =
-        document.createElement("div");
+        document.createElement(
+            "div"
+        );
+
 
     contentElement.className =
         "message-content";
 
 
-    if (role === "assistant") {
+    if (
+        role === "assistant"
+    ) {
 
         contentElement.classList.add(
             "answer-content"
         );
 
+
         contentElement.innerHTML =
-            formatAnswer(content);
+            formatAnswer(
+                content
+            );
 
     } else {
 
@@ -330,11 +427,15 @@ function renderMessage(
     }
 
 
-    message.appendChild(header);
+    message.appendChild(
+        header
+    );
+
 
     message.appendChild(
         contentElement
     );
+
 
     container.appendChild(
         message
@@ -349,17 +450,21 @@ function renderMessage(
 // RENDER ALL MESSAGES
 // =========================================================
 
-function renderMessages(messages) {
+function renderMessages(
+    messages
+) {
 
     const container =
         $("chatContainer");
+
 
     if (!container) {
         return;
     }
 
 
-    container.innerHTML = "";
+    container.innerHTML =
+        "";
 
 
     if (
@@ -415,12 +520,19 @@ function hideSources() {
 
     if (container) {
 
-        container.innerHTML = "";
+        container.innerHTML =
+            "";
     }
 }
 
 
-function renderSources(sources) {
+// =========================================================
+// RENDER SOURCES
+// =========================================================
+
+function renderSources(
+    sources
+) {
 
     const section =
         $("sourcesSection");
@@ -433,11 +545,13 @@ function renderSources(sources) {
         !section ||
         !container
     ) {
+
         return;
     }
 
 
-    container.innerHTML = "";
+    container.innerHTML =
+        "";
 
 
     if (
@@ -466,6 +580,7 @@ function renderSources(sources) {
                     "div"
                 );
 
+
             card.className =
                 "source-card";
 
@@ -475,8 +590,10 @@ function renderSources(sources) {
                     "div"
                 );
 
+
             name.className =
                 "source-name";
+
 
             name.textContent =
                 source.file_name ||
@@ -488,6 +605,7 @@ function renderSources(sources) {
                 document.createElement(
                     "div"
                 );
+
 
             location.className =
                 "source-location";
@@ -518,7 +636,9 @@ function renderSources(sources) {
 
 
             location.textContent =
-                parts.join(" • ");
+                parts.join(
+                    " • "
+                );
 
 
             card.appendChild(
@@ -526,7 +646,9 @@ function renderSources(sources) {
             );
 
 
-            if (parts.length) {
+            if (
+                parts.length
+            ) {
 
                 card.appendChild(
                     location
@@ -547,13 +669,17 @@ function renderSources(sources) {
 // DOCUMENT LIBRARY STORAGE
 // =========================================================
 
-function getChatDocumentsKey(chatId) {
+function getChatDocumentsKey(
+    chatId
+) {
 
     return `rag_documents_${chatId}`;
 }
 
 
-function getChatDocuments(chatId) {
+function getChatDocuments(
+    chatId
+) {
 
     if (!chatId) {
         return [];
@@ -576,17 +702,23 @@ function getChatDocuments(chatId) {
 
 
         const documents =
-            JSON.parse(stored);
+            JSON.parse(
+                stored
+            );
 
 
         if (
-            !Array.isArray(documents)
+            !Array.isArray(
+                documents
+            )
         ) {
+
             return [];
         }
 
 
         return documents;
+
 
     } catch (error) {
 
@@ -595,10 +727,15 @@ function getChatDocuments(chatId) {
             error
         );
 
+
         return [];
     }
 }
 
+
+// =========================================================
+// SAVE CHAT DOCUMENTS
+// =========================================================
 
 function saveChatDocuments(
     chatId,
@@ -617,9 +754,12 @@ function saveChatDocuments(
                 chatId
             ),
             JSON.stringify(
-                documents
+                Array.isArray(documents)
+                    ? documents
+                    : []
             )
         );
+
 
     } catch (error) {
 
@@ -635,7 +775,9 @@ function saveChatDocuments(
 // FILE SIZE
 // =========================================================
 
-function formatFileSize(bytes) {
+function formatFileSize(
+    bytes
+) {
 
     if (
         bytes === undefined ||
@@ -644,6 +786,7 @@ function formatFileSize(bytes) {
             Number(bytes)
         )
     ) {
+
         return "";
     }
 
@@ -655,6 +798,7 @@ function formatFileSize(bytes) {
     if (
         size < 1024
     ) {
+
         return `${size} B`;
     }
 
@@ -662,6 +806,7 @@ function formatFileSize(bytes) {
     if (
         size < 1024 * 1024
     ) {
+
         return `${(
             size / 1024
         ).toFixed(1)} KB`;
@@ -671,8 +816,10 @@ function formatFileSize(bytes) {
     if (
         size < 1024 * 1024 * 1024
     ) {
+
         return `${(
-            size / (1024 * 1024)
+            size /
+            (1024 * 1024)
         ).toFixed(1)} MB`;
     }
 
@@ -688,7 +835,9 @@ function formatFileSize(bytes) {
 // DOCUMENT ICON
 // =========================================================
 
-function getDocumentIcon(fileName) {
+function getDocumentIcon(
+    fileName
+) {
 
     const extension =
         (
@@ -702,6 +851,7 @@ function getDocumentIcon(fileName) {
     if (
         extension === "pdf"
     ) {
+
         return "📕";
     }
 
@@ -710,6 +860,7 @@ function getDocumentIcon(fileName) {
         extension === "docx" ||
         extension === "doc"
     ) {
+
         return "📘";
     }
 
@@ -718,6 +869,7 @@ function getDocumentIcon(fileName) {
         extension === "pptx" ||
         extension === "ppt"
     ) {
+
         return "📙";
     }
 
@@ -727,6 +879,7 @@ function getDocumentIcon(fileName) {
         extension === "xls" ||
         extension === "csv"
     ) {
+
         return "📊";
     }
 
@@ -736,6 +889,7 @@ function getDocumentIcon(fileName) {
         extension === "jpg" ||
         extension === "jpeg"
     ) {
+
         return "🖼️";
     }
 
@@ -743,11 +897,76 @@ function getDocumentIcon(fileName) {
     if (
         extension === "txt"
     ) {
+
         return "📄";
     }
 
 
     return "📁";
+}
+
+
+// =========================================================
+// NORMALIZE DOCUMENT OBJECT
+// =========================================================
+
+function normalizeDocumentForUI(
+    doc,
+    fallbackFile = null
+) {
+
+    const fileName =
+        doc?.file_name ||
+        doc?.filename ||
+        doc?.name ||
+        fallbackFile?.name ||
+        "Unnamed document";
+
+
+    return {
+
+        id:
+            doc?.id ||
+            doc?.file_id ||
+            null,
+
+        file_name:
+            fileName,
+
+        filename:
+            fileName,
+
+        name:
+            fileName,
+
+        file_type:
+            doc?.file_type ||
+            doc?.mime_type ||
+            doc?.type ||
+            (
+                fileName
+                    .split(".")
+                    .pop() ||
+                ""
+            ).toUpperCase(),
+
+        file_size:
+            doc?.file_size ??
+            doc?.size ??
+            fallbackFile?.size ??
+            0,
+
+        chunks:
+            doc?.chunks ??
+            doc?.chunk_count ??
+            doc?.chunks_count ??
+            0,
+
+        uploaded_at:
+            doc?.uploaded_at ||
+            doc?.created_at ||
+            new Date().toISOString()
+    };
 }
 
 
@@ -780,12 +999,11 @@ function renderDocumentLibrary() {
     }
 
 
-    // currentChatId comes from chats.js.
-    // NEVER redeclare it here.
+    // currentChatId belongs to chats.js.
 
     if (
         typeof currentChatId ===
-        "undefined" ||
+            "undefined" ||
         !currentChatId
     ) {
 
@@ -795,11 +1013,13 @@ function renderDocumentLibrary() {
         documentList.innerHTML =
             "";
 
+
         if (countElement) {
 
             countElement.textContent =
                 "0 documents";
         }
+
 
         return;
     }
@@ -847,6 +1067,7 @@ function renderDocumentLibrary() {
                     "div"
                 );
 
+
             card.className =
                 "document-card";
 
@@ -876,14 +1097,15 @@ function renderDocumentLibrary() {
                 "rgba(255,255,255,0.04)";
 
 
-            // -------------------------------------------------
+            // =================================================
             // ICON
-            // -------------------------------------------------
+            // =================================================
 
             const icon =
                 document.createElement(
                     "div"
                 );
+
 
             icon.textContent =
                 getDocumentIcon(
@@ -891,18 +1113,20 @@ function renderDocumentLibrary() {
                     "document"
                 );
 
+
             icon.style.fontSize =
                 "28px";
 
 
-            // -------------------------------------------------
+            // =================================================
             // INFO
-            // -------------------------------------------------
+            // =================================================
 
             const info =
                 document.createElement(
                     "div"
                 );
+
 
             info.style.flex =
                 "1";
@@ -916,9 +1140,11 @@ function renderDocumentLibrary() {
                     "div"
                 );
 
+
             name.textContent =
                 doc.file_name ||
                 "Unnamed document";
+
 
             name.style.fontWeight =
                 "600";
@@ -953,21 +1179,33 @@ function renderDocumentLibrary() {
 
 
             if (
-                doc.file_size !== undefined &&
-                doc.file_size !== null
+                doc.file_size !==
+                    undefined &&
+                doc.file_size !==
+                    null
             ) {
 
-                parts.push(
+                const formattedSize =
                     formatFileSize(
                         doc.file_size
-                    )
-                );
+                    );
+
+
+                if (formattedSize) {
+
+                    parts.push(
+                        formattedSize
+                    );
+                }
             }
 
 
             if (
-                doc.chunks !== undefined &&
-                doc.chunks !== null
+                doc.chunks !==
+                    undefined &&
+                doc.chunks !==
+                    null &&
+                Number(doc.chunks) > 0
             ) {
 
                 parts.push(
@@ -977,7 +1215,9 @@ function renderDocumentLibrary() {
 
 
             meta.textContent =
-                parts.join(" • ");
+                parts.join(
+                    " • "
+                );
 
 
             meta.style.fontSize =
@@ -999,17 +1239,19 @@ function renderDocumentLibrary() {
             );
 
 
-            // -------------------------------------------------
+            // =================================================
             // STATUS
-            // -------------------------------------------------
+            // =================================================
 
             const status =
                 document.createElement(
                     "div"
                 );
 
+
             status.textContent =
                 "✓ Ready";
+
 
             status.style.fontSize =
                 "12px";
@@ -1053,6 +1295,118 @@ function renderDocumentLibrary() {
 
 
 // =========================================================
+// RESTORE DOCUMENTS FROM BACKEND
+// =========================================================
+
+async function refreshCurrentChatDocuments() {
+
+    if (
+        typeof currentChatId ===
+            "undefined" ||
+        !currentChatId
+    ) {
+
+        renderDocumentLibrary();
+
+        return [];
+    }
+
+
+    try {
+
+        console.log(
+            "Refreshing backend documents for chat:",
+            currentChatId
+        );
+
+
+        const response =
+            await getChatFiles(
+                currentChatId
+            );
+
+
+        let files = [];
+
+
+        if (
+            Array.isArray(response)
+        ) {
+
+            files =
+                response;
+
+        } else if (
+            Array.isArray(
+                response?.files
+            )
+        ) {
+
+            files =
+                response.files;
+
+        } else if (
+            Array.isArray(
+                response?.documents
+            )
+        ) {
+
+            files =
+                response.documents;
+        }
+
+
+        const documents =
+            files.map(
+                file =>
+                    normalizeDocumentForUI(
+                        file
+                    )
+            );
+
+
+        // Backend is source of truth.
+
+        saveChatDocuments(
+            currentChatId,
+            documents
+        );
+
+
+        renderDocumentLibrary();
+
+
+        console.log(
+            "Documents restored:",
+            documents
+        );
+
+
+        return documents;
+
+
+    } catch (error) {
+
+        console.warn(
+            "Could not refresh documents from backend:",
+            error
+        );
+
+
+        // Keep cached documents if backend
+        // temporarily fails.
+
+        renderDocumentLibrary();
+
+
+        return getChatDocuments(
+            currentChatId
+        );
+    }
+}
+
+
+// =========================================================
 // ADD UPLOADED DOCUMENT
 // =========================================================
 
@@ -1063,7 +1417,7 @@ function addUploadedDocument(
 
     if (
         typeof currentChatId ===
-        "undefined" ||
+            "undefined" ||
         !currentChatId
     ) {
 
@@ -1081,37 +1435,18 @@ function addUploadedDocument(
         );
 
 
-    const documentData = {
-
-        file_name:
-            uploadResult?.file_name ||
-            file.name,
-
-        file_type:
-            (
-                file.name
-                    .split(".")
-                    .pop() ||
-                ""
-            ).toUpperCase(),
-
-        file_size:
-            file.size,
-
-        chunks:
-            uploadResult?.chunks ??
-            0,
-
-        uploaded_at:
-            new Date().toISOString()
-    };
+    const documentData =
+        normalizeDocumentForUI(
+            uploadResult,
+            file
+        );
 
 
     const existingIndex =
         documents.findIndex(
             document =>
                 document.file_name ===
-                file.name
+                documentData.file_name
         );
 
 
@@ -1150,7 +1485,7 @@ async function ensureCurrentChat() {
 
     if (
         typeof currentChatId !==
-        "undefined" &&
+            "undefined" &&
         currentChatId
     ) {
 
@@ -1162,8 +1497,6 @@ async function ensureCurrentChat() {
         "Creating a new chat..."
     );
 
-
-    // createChat() comes from api.js.
 
     const result =
         await createChat();
@@ -1180,18 +1513,29 @@ async function ensureCurrentChat() {
     }
 
 
-    // currentChatId comes from chats.js.
-
     currentChatId =
         result.chat_id;
 
 
-    // Persist current chat.
+    // Use chats.js persistence function
+    // when available.
 
-    localStorage.setItem(
-        "rag_current_chat_id",
-        currentChatId
-    );
+    if (
+        typeof saveCurrentChatId ===
+        "function"
+    ) {
+
+        saveCurrentChatId(
+            currentChatId
+        );
+
+    } else {
+
+        localStorage.setItem(
+            "rag_current_chat_id",
+            currentChatId
+        );
+    }
 
 
     console.log(
@@ -1199,8 +1543,6 @@ async function ensureCurrentChat() {
         currentChatId
     );
 
-
-    // Refresh recent chats.
 
     if (
         typeof loadChats ===
@@ -1247,9 +1589,9 @@ function initializeUploadUI() {
         $("fileInput");
 
 
-    // -----------------------------------------------------
+    // =====================================================
     // OPEN UPLOAD PANEL
-    // -----------------------------------------------------
+    // =====================================================
 
     if (
         uploadBtn &&
@@ -1269,9 +1611,9 @@ function initializeUploadUI() {
     }
 
 
-    // -----------------------------------------------------
+    // =====================================================
     // CLOSE UPLOAD PANEL
-    // -----------------------------------------------------
+    // =====================================================
 
     if (
         closeUploadBtn &&
@@ -1293,9 +1635,9 @@ function initializeUploadUI() {
     }
 
 
-    // -----------------------------------------------------
+    // =====================================================
     // CHECK FILE INPUT
-    // -----------------------------------------------------
+    // =====================================================
 
     if (
         !chooseFilesBtn ||
@@ -1310,22 +1652,13 @@ function initializeUploadUI() {
     }
 
 
-    // -----------------------------------------------------
+    // =====================================================
     // CHOOSE FILES
-    // -----------------------------------------------------
-    //
-    // IMPORTANT:
-    // Open native file picker immediately.
-    // Do not await createChat() before this.
-    //
+    // =====================================================
 
     chooseFilesBtn.addEventListener(
         "click",
         () => {
-
-            console.log(
-                "Choose Files clicked."
-            );
 
             fileInput.click();
 
@@ -1333,9 +1666,9 @@ function initializeUploadUI() {
     );
 
 
-    // -----------------------------------------------------
+    // =====================================================
     // FILE SELECTED
-    // -----------------------------------------------------
+    // =====================================================
 
     fileInput.addEventListener(
         "change",
@@ -1350,17 +1683,22 @@ function initializeUploadUI() {
             if (
                 !files.length
             ) {
+
                 return;
             }
 
 
-            if (isUploading) {
+            if (
+                isUploading
+            ) {
+
                 return;
             }
 
 
             isUploading =
                 true;
+
 
             chooseFilesBtn.disabled =
                 true;
@@ -1372,134 +1710,24 @@ function initializeUploadUI() {
                     0;
 
 
-                // -------------------------------------------------
-                // VALIDATE CURRENT CHAT
-                // -------------------------------------------------
+                // =================================================
+                // ENSURE CHAT
+                // =================================================
 
-                if (
-                    typeof currentChatId !==
-                        "undefined" &&
-                    currentChatId
-                ) {
-
-                    try {
-
-                        console.log(
-                            "Checking current chat:",
-                            currentChatId
-                        );
+                await ensureCurrentChat();
 
 
-                        // getChat() comes from api.js.
+                if (!currentChatId) {
 
-                        if (
-                            typeof getChat ===
-                            "function"
-                        ) {
-
-                            await getChat(
-                                currentChatId
-                            );
-
-                            console.log(
-                                "Current chat is valid:",
-                                currentChatId
-                            );
-
-                        }
-
-                    } catch (error) {
-
-                        console.warn(
-                            "Current chat is invalid. Creating a new chat.",
-                            error
-                        );
-
-
-                        currentChatId =
-                            null;
-
-
-                        localStorage.removeItem(
-                            "rag_current_chat_id"
-                        );
-                    }
+                    throw new Error(
+                        "No active chat available for upload."
+                    );
                 }
 
 
-                // -------------------------------------------------
-                // CREATE CHAT IF NEEDED
-                // -------------------------------------------------
-
-                if (
-                    typeof currentChatId ===
-                        "undefined" ||
-                    !currentChatId
-                ) {
-
-                    setStatus(
-                        "Creating a new chat..."
-                    );
-
-
-                    const result =
-                        await createChat();
-
-
-                    if (
-                        !result ||
-                        !result.chat_id
-                    ) {
-
-                        throw new Error(
-                            "Could not create a chat."
-                        );
-                    }
-
-
-                    currentChatId =
-                        result.chat_id;
-
-
-                    // Persist the newly created chat.
-
-                    localStorage.setItem(
-                        "rag_current_chat_id",
-                        currentChatId
-                    );
-
-
-                    console.log(
-                        "New chat created:",
-                        currentChatId
-                    );
-
-
-                    // Refresh chat list.
-
-                    if (
-                        typeof loadChats ===
-                        "function"
-                    ) {
-
-                        try {
-
-                            await loadChats();
-
-                        } catch (error) {
-
-                            console.warn(
-                                "Could not refresh chats:",
-                                error
-                            );
-                        }
-                    }
-                }
-
-
-                // -------------------------------------------------
+                // =================================================
                 // UPLOAD EACH FILE
-                // -------------------------------------------------
+                // =================================================
 
                 for (
                     const file of files
@@ -1518,8 +1746,6 @@ function initializeUploadUI() {
                     );
 
 
-                    // uploadDocument() comes from api.js.
-
                     const result =
                         await uploadDocument(
                             currentChatId,
@@ -1533,6 +1759,10 @@ function initializeUploadUI() {
                     );
 
 
+                    // =================================================
+                    // SHOW IMMEDIATELY
+                    // =================================================
+
                     addUploadedDocument(
                         result,
                         file
@@ -1543,9 +1773,21 @@ function initializeUploadUI() {
                 }
 
 
-                // -------------------------------------------------
+                // =================================================
+                // IMPORTANT:
+                //
+                // NOW GET FILES DIRECTLY FROM BACKEND.
+                //
+                // This guarantees that the document shown in UI
+                // is actually associated with this chat.
+                // =================================================
+
+                await refreshCurrentChatDocuments();
+
+
+                // =================================================
                 // SUCCESS
-                // -------------------------------------------------
+                // =================================================
 
                 if (
                     uploadedCount === 1
@@ -1563,16 +1805,9 @@ function initializeUploadUI() {
                 }
 
 
-                // -------------------------------------------------
-                // REFRESH DOCUMENT LIBRARY
-                // -------------------------------------------------
-
-                renderDocumentLibrary();
-
-
-                // -------------------------------------------------
+                // =================================================
                 // CLOSE PANEL
-                // -------------------------------------------------
+                // =================================================
 
                 if (
                     uploadPanel
@@ -1584,9 +1819,9 @@ function initializeUploadUI() {
                 }
 
 
-                // -------------------------------------------------
-                // REFRESH CHATS
-                // -------------------------------------------------
+                // =================================================
+                // REFRESH SIDEBAR
+                // =================================================
 
                 if (
                     typeof loadChats ===
@@ -1606,6 +1841,7 @@ function initializeUploadUI() {
                     }
                 }
 
+
             } catch (error) {
 
                 console.error(
@@ -1619,6 +1855,7 @@ function initializeUploadUI() {
                     "Document upload failed.",
                     true
                 );
+
 
             } finally {
 
@@ -1667,9 +1904,9 @@ function initializeQuestionInput() {
     }
 
 
-    // -----------------------------------------------------
+    // =====================================================
     // SEND BUTTON
-    // -----------------------------------------------------
+    // =====================================================
 
     sendBtn.addEventListener(
         "click",
@@ -1681,9 +1918,9 @@ function initializeQuestionInput() {
     );
 
 
-    // -----------------------------------------------------
+    // =====================================================
     // ENTER KEY
-    // -----------------------------------------------------
+    // =====================================================
 
     input.addEventListener(
         "keydown",
@@ -1691,7 +1928,7 @@ function initializeQuestionInput() {
 
             if (
                 event.key ===
-                "Enter" &&
+                    "Enter" &&
                 !event.shiftKey
             ) {
 
@@ -1704,9 +1941,9 @@ function initializeQuestionInput() {
     );
 
 
-    // -----------------------------------------------------
+    // =====================================================
     // AUTO RESIZE
-    // -----------------------------------------------------
+    // =====================================================
 
     input.addEventListener(
         "input",
@@ -1721,6 +1958,7 @@ function initializeQuestionInput() {
                     input.scrollHeight,
                     180
                 )}px`;
+
         }
     );
 }
@@ -1739,6 +1977,10 @@ async function sendQuestion() {
         $("sendBtn");
 
 
+    // =====================================================
+    // BASIC VALIDATION
+    // =====================================================
+
     if (!input) {
         return;
     }
@@ -1753,19 +1995,40 @@ async function sendQuestion() {
     }
 
 
+    // =====================================================
+    // DUPLICATE PROTECTION
+    // =====================================================
+
     if (isAsking) {
+
+        console.log(
+            "Question already being processed."
+        );
+
         return;
     }
 
 
     try {
 
-        // -------------------------------------------------
-        // ENSURE CHAT
-        // -------------------------------------------------
+        // =================================================
+        // ENSURE CHAT EXISTS
+        // =================================================
 
         await ensureCurrentChat();
 
+
+        if (!currentChatId) {
+
+            throw new Error(
+                "No active chat available."
+            );
+        }
+
+
+        // =================================================
+        // LOCK REQUEST
+        // =================================================
 
         isAsking =
             true;
@@ -1782,50 +2045,96 @@ async function sendQuestion() {
             true;
 
 
+        // =================================================
+        // HIDE EMPTY STATE
+        // =================================================
+
         hideEmptyState();
 
 
-        // -------------------------------------------------
-        // SHOW USER MESSAGE
-        // -------------------------------------------------
+        // =================================================
+        // CAPTURE QUESTION
+        // =================================================
 
-        renderMessage(
-            "user",
-            question
-        );
+        const submittedQuestion =
+            question;
 
+
+        // =================================================
+        // CLEAR INPUT IMMEDIATELY
+        // =================================================
 
         input.value =
             "";
+
 
         input.style.height =
             "auto";
 
 
-        // -------------------------------------------------
-        // SAVE USER MESSAGE
-        // -------------------------------------------------
+        // =================================================
+        // SHOW USER MESSAGE
+        // =================================================
 
-        try {
+        renderMessage(
+            "user",
+            submittedQuestion
+        );
 
-            await saveChatMessage(
-                currentChatId,
-                "user",
-                question
-            );
 
-        } catch (error) {
+        // =================================================
+        // AUTOMATIC CHAT NAME
+        // =================================================
+        //
+        // We use the chats.js function.
+        //
+        // IMPORTANT:
+        // We intentionally DO NOT await it.
+        //
+        // The actual question should not be blocked
+        // by the title update.
+        //
+        // Manual rename is protected inside autoNameChat().
+        // =================================================
 
-            console.warn(
-                "Could not save user message:",
-                error
-            );
+        const chatsModule =
+            window.RAGChats;
+
+
+        if (
+            chatsModule &&
+            typeof chatsModule.autoNameChat ===
+                "function"
+        ) {
+
+            chatsModule
+                .autoNameChat(
+                    currentChatId,
+                    submittedQuestion
+                )
+                .catch(
+                    error => {
+
+                        console.warn(
+                            "Automatic chat naming failed:",
+                            error
+                        );
+                    }
+                );
         }
 
 
-        // -------------------------------------------------
+        // =================================================
         // ASK BACKEND
-        // -------------------------------------------------
+        // =================================================
+        //
+        // IMPORTANT:
+        //
+        // DO NOT call saveChatMessage() here.
+        //
+        // The backend /ask endpoint is already responsible
+        // for saving the question and answer.
+        // =================================================
 
         setStatus(
             "Thinking..."
@@ -1835,7 +2144,7 @@ async function sendQuestion() {
         const response =
             await askDocuments(
                 currentChatId,
-                question
+                submittedQuestion
             );
 
 
@@ -1845,9 +2154,9 @@ async function sendQuestion() {
         );
 
 
-        // -------------------------------------------------
-        // ANSWER
-        // -------------------------------------------------
+        // =================================================
+        // EXTRACT ANSWER
+        // =================================================
 
         const answer =
             response?.answer ||
@@ -1856,15 +2165,19 @@ async function sendQuestion() {
             "No answer returned.";
 
 
-        // -------------------------------------------------
-        // SOURCES
-        // -------------------------------------------------
+        // =================================================
+        // EXTRACT SOURCES
+        // =================================================
 
         const sources =
             response?.sources ||
             response?.citations ||
             [];
 
+
+        // =================================================
+        // RENDER SOURCES
+        // =================================================
 
         if (
             Array.isArray(
@@ -1878,30 +2191,9 @@ async function sendQuestion() {
         }
 
 
-        // -------------------------------------------------
-        // SAVE ASSISTANT MESSAGE
-        // -------------------------------------------------
-
-        try {
-
-            await saveChatMessage(
-                currentChatId,
-                "assistant",
-                answer
-            );
-
-        } catch (error) {
-
-            console.warn(
-                "Could not save assistant message:",
-                error
-            );
-        }
-
-
-        // -------------------------------------------------
+        // =================================================
         // SHOW ASSISTANT MESSAGE
-        // -------------------------------------------------
+        // =================================================
 
         renderMessage(
             "assistant",
@@ -1909,12 +2201,12 @@ async function sendQuestion() {
         );
 
 
-        setStatus("");
-
-
-        // -------------------------------------------------
-        // REFRESH CHAT LIST
-        // -------------------------------------------------
+        // =================================================
+        // REFRESH SIDEBAR
+        // =================================================
+        //
+        // This gets the latest title from backend.
+        // =================================================
 
         if (
             typeof loadChats ===
@@ -1935,7 +2227,37 @@ async function sendQuestion() {
         }
 
 
+        // =================================================
+        // RESTORE ACTIVE CHAT STYLE
+        // =================================================
+
+        if (
+            typeof updateActiveChatStyles ===
+            "function"
+        ) {
+
+            updateActiveChatStyles();
+
+        } else if (
+            window.RAGChats &&
+            typeof window.RAGChats.highlightCurrentChat ===
+                "function"
+        ) {
+
+            window.RAGChats
+                .highlightCurrentChat();
+        }
+
+
+        // =================================================
+        // CLEAR STATUS
+        // =================================================
+
+        setStatus("");
+
+
         return response;
+
 
     } catch (error) {
 
@@ -1951,7 +2273,12 @@ async function sendQuestion() {
             true
         );
 
+
     } finally {
+
+        // =================================================
+        // UNLOCK
+        // =================================================
 
         isAsking =
             false;
@@ -1964,11 +2291,13 @@ async function sendQuestion() {
         }
 
 
-        input.disabled =
-            false;
+        if (input) {
 
+            input.disabled =
+                false;
 
-        input.focus();
+            input.focus();
+        }
     }
 }
 
@@ -2104,7 +2433,9 @@ function extractYouTubeVideoId(
             new URL(url);
 
 
+        // =====================================================
         // youtube.com/watch?v=...
+        // =====================================================
 
         if (
             parsed.hostname.includes(
@@ -2119,12 +2450,15 @@ function extractYouTubeVideoId(
 
 
             if (id) {
+
                 return id;
             }
         }
 
 
+        // =====================================================
         // youtu.be/VIDEO_ID
+        // =====================================================
 
         if (
             parsed.hostname.includes(
@@ -2141,7 +2475,9 @@ function extractYouTubeVideoId(
         }
 
 
+        // =====================================================
         // youtube.com/embed/VIDEO_ID
+        // =====================================================
 
         if (
             parsed.pathname.startsWith(
@@ -2157,6 +2493,7 @@ function extractYouTubeVideoId(
                 null;
         }
 
+
     } catch (error) {
 
         console.warn(
@@ -2169,6 +2506,10 @@ function extractYouTubeVideoId(
     return null;
 }
 
+
+// =========================================================
+// SHOW YOUTUBE VIDEO
+// =========================================================
 
 function showYouTubeVideo(
     url
@@ -2185,6 +2526,7 @@ function showYouTubeVideo(
         !panel ||
         !iframe
     ) {
+
         return;
     }
 
@@ -2225,6 +2567,10 @@ function showYouTubeVideo(
 }
 
 
+// =========================================================
+// HIDE YOUTUBE VIDEO
+// =========================================================
+
 function hideYouTubeVideo() {
 
     const panel =
@@ -2246,6 +2592,7 @@ function hideYouTubeVideo() {
         panel.classList.add(
             "hidden"
         );
+
 
         panel.style.display =
             "none";
@@ -2328,13 +2675,10 @@ function initializeYouTubeUI() {
                 );
 
 
-                // There is currently no YouTube
-                // transcript-analysis API route
-                // connected to this frontend.
-
                 setStatus(
                     "YouTube video loaded. Transcript analysis endpoint is not connected yet."
                 );
+
             }
         );
     }
@@ -2389,6 +2733,7 @@ async function initializeApiHealth() {
             );
         }
 
+
     } catch (error) {
 
         console.error(
@@ -2397,13 +2742,134 @@ async function initializeApiHealth() {
         );
 
 
-        // Do not throw here.
-        // Chat loading should continue even if
-        // the health endpoint fails.
-
         console.warn(
             "Continuing application initialization..."
         );
+    }
+}
+
+
+// =========================================================
+// RESTORE SAVED CHAT
+// =========================================================
+
+async function restoreSavedChat() {
+
+    let savedChatId = null;
+
+
+    // =====================================================
+    // Prefer chats.js helper
+    // =====================================================
+
+    if (
+        window.RAGChats &&
+        typeof window.RAGChats.getSavedCurrentChatId ===
+            "function"
+    ) {
+
+        savedChatId =
+            window.RAGChats
+                .getSavedCurrentChatId();
+
+    } else {
+
+        savedChatId =
+            localStorage.getItem(
+                "rag_current_chat_id"
+            );
+    }
+
+
+    if (!savedChatId) {
+
+        console.log(
+            "No saved chat to restore."
+        );
+
+        return;
+    }
+
+
+    console.log(
+        "Saved chat found:",
+        savedChatId
+    );
+
+
+    try {
+
+        // =================================================
+        // Use chats.js selectChat
+        // =================================================
+
+        if (
+            window.RAGChats &&
+            typeof window.RAGChats.selectChat ===
+                "function"
+        ) {
+
+            await window.RAGChats.selectChat(
+                savedChatId
+            );
+
+
+            console.log(
+                "Previous chat restored:",
+                savedChatId
+            );
+
+
+            return;
+        }
+
+
+        // Fallback for older loading order.
+
+        if (
+            typeof selectChat ===
+            "function"
+        ) {
+
+            await selectChat(
+                savedChatId
+            );
+
+            return;
+        }
+
+
+        throw new Error(
+            "selectChat() is not available."
+        );
+
+
+    } catch (error) {
+
+        console.warn(
+            "Could not restore previous chat:",
+            error
+        );
+
+
+        // Remove only invalid saved ID.
+
+        localStorage.removeItem(
+            "rag_current_chat_id"
+        );
+
+
+        if (
+            window.RAGChats &&
+            typeof window.RAGChats.setCurrentChatId ===
+                "function"
+        ) {
+
+            window.RAGChats
+                .setCurrentChatId(
+                    null
+                );
+        }
     }
 }
 
@@ -2419,35 +2885,42 @@ async function initializeApp() {
     );
 
 
-    // -----------------------------------------------------
+    // =====================================================
     // CHAT CONTROLS
-    // -----------------------------------------------------
+    // =====================================================
     //
-    // Provided by chats.js.
+    // chats.js now initializes itself.
     //
+    // We still call initializeChatControls if available,
+    // because this makes app.js compatible with the module.
+    //
+    // chats.js protects against duplicate listeners.
+    // =====================================================
 
-    if (
-        typeof initializeChatControls ===
-        "function"
-    ) {
+    try {
 
-        try {
+        if (
+            window.RAGChats &&
+            typeof window.RAGChats.initializeChatControls ===
+                "function"
+        ) {
 
-            initializeChatControls();
-
-        } catch (error) {
-
-            console.error(
-                "Chat controls initialization failed:",
-                error
-            );
+            window.RAGChats
+                .initializeChatControls();
         }
+
+    } catch (error) {
+
+        console.error(
+            "Chat controls initialization failed:",
+            error
+        );
     }
 
 
-    // -----------------------------------------------------
+    // =====================================================
     // ACTION BUTTONS
-    // -----------------------------------------------------
+    // =====================================================
 
     try {
 
@@ -2462,9 +2935,9 @@ async function initializeApp() {
     }
 
 
-    // -----------------------------------------------------
+    // =====================================================
     // UPLOAD
-    // -----------------------------------------------------
+    // =====================================================
 
     try {
 
@@ -2479,9 +2952,9 @@ async function initializeApp() {
     }
 
 
-    // -----------------------------------------------------
+    // =====================================================
     // QUESTION INPUT
-    // -----------------------------------------------------
+    // =====================================================
 
     try {
 
@@ -2496,9 +2969,9 @@ async function initializeApp() {
     }
 
 
-    // -----------------------------------------------------
+    // =====================================================
     // YOUTUBE
-    // -----------------------------------------------------
+    // =====================================================
 
     try {
 
@@ -2513,158 +2986,121 @@ async function initializeApp() {
     }
 
 
-    // -----------------------------------------------------
+    // =====================================================
     // BACKEND HEALTH
-    // -----------------------------------------------------
+    // =====================================================
     //
-    // IMPORTANT:
-    // Do NOT await this.
-    //
-    // A slow health endpoint must not block
-    // Recent Chats from loading.
-    //
+    // Do not block app startup.
+    // =====================================================
 
     initializeApiHealth();
 
 
-    // -----------------------------------------------------
+    // =====================================================
     // LOAD CHATS
-    // -----------------------------------------------------
+    // =====================================================
 
-    if (
-        typeof loadChats ===
-        "function"
-    ) {
+    try {
 
-        try {
+        if (
+            window.RAGChats &&
+            typeof window.RAGChats.loadChats ===
+                "function"
+        ) {
 
-            console.log(
-                "Loading chats..."
-            );
+            await window.RAGChats
+                .loadChats();
 
+        } else if (
+            typeof loadChats ===
+            "function"
+        ) {
 
             await loadChats();
 
+        } else {
 
-            console.log(
-                "Chats loaded successfully."
-            );
-
-        } catch (error) {
-
-            console.error(
-                "Could not load chats:",
-                error
-            );
-
-            setStatus(
-                "Could not load recent chats.",
-                true
+            throw new Error(
+                "loadChats() is not available."
             );
         }
 
-    } else {
-
-        console.error(
-            "loadChats() is not available. Check chats.js."
-        );
-    }
-
-
-    // -----------------------------------------------------
-    // RESTORE PREVIOUS CHAT
-    // -----------------------------------------------------
-
-    const savedChatId =
-        localStorage.getItem(
-            "rag_current_chat_id"
-        );
-
-
-    if (savedChatId) {
 
         console.log(
-            "Saved chat found:",
-            savedChatId
+            "Chats loaded successfully."
         );
 
 
-        try {
+    } catch (error) {
 
-            if (
-                typeof openChat !==
-                "function"
-            ) {
-
-                throw new Error(
-                    "openChat() is not available."
-                );
-            }
+        console.error(
+            "Could not load chats:",
+            error
+        );
 
 
-            // currentChatId comes from chats.js.
-
-            currentChatId =
-                savedChatId;
-
-
-            await openChat(
-                savedChatId
-            );
-
-
-            // Keep persistence in sync.
-
-            if (
-                typeof currentChatId !==
-                    "undefined" &&
-                currentChatId
-            ) {
-
-                localStorage.setItem(
-                    "rag_current_chat_id",
-                    currentChatId
-                );
-            }
-
-
-            console.log(
-                "Restored previous chat:",
-                savedChatId
-            );
-
-        } catch (error) {
-
-            console.warn(
-                "Could not restore previous chat:",
-                error
-            );
-
-
-            // Remove only the invalid saved ID.
-
-            localStorage.removeItem(
-                "rag_current_chat_id"
-            );
-
-
-            if (
-                typeof currentChatId !==
-                "undefined"
-            ) {
-
-                currentChatId =
-                    null;
-            }
-        }
+        setStatus(
+            "Could not load recent chats.",
+            true
+        );
     }
 
 
-    // -----------------------------------------------------
-    // DOCUMENT LIBRARY
-    // -----------------------------------------------------
+    // =====================================================
+    // RESTORE PREVIOUS CHAT
+    // =====================================================
 
-    renderDocumentLibrary();
+    await restoreSavedChat();
+
+
+    // =====================================================
+    // DOCUMENT LIBRARY
+    // =====================================================
+
+    try {
+
+        // If a chat was restored, get its documents
+        // directly from backend.
+
+        if (
+            typeof currentChatId !==
+                "undefined" &&
+            currentChatId
+        ) {
+
+            await refreshCurrentChatDocuments();
+
+        } else {
+
+            renderDocumentLibrary();
+        }
+
+
+    } catch (error) {
+
+        console.warn(
+            "Could not restore document library:",
+            error
+        );
+
+
+        renderDocumentLibrary();
+    }
+
+
+    // =====================================================
+    // FINAL ACTIVE CHAT STATE
+    // =====================================================
+
+    if (
+        window.RAGChats &&
+        typeof window.RAGChats.highlightCurrentChat ===
+            "function"
+    ) {
+
+        window.RAGChats
+            .highlightCurrentChat();
+    }
 
 
     console.log(
@@ -2716,6 +3152,8 @@ window.RAGApp = {
 
     addUploadedDocument,
 
+    refreshCurrentChatDocuments,
+
     extractYouTubeVideoId,
 
     showYouTubeVideo,
@@ -2730,8 +3168,9 @@ window.RAGApp = {
 
     initializeQuestionInput,
 
-    initializeYouTubeUI
+    initializeYouTubeUI,
 
+    restoreSavedChat
 };
 
 

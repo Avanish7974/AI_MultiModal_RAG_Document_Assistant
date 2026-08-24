@@ -7,13 +7,65 @@ let selectedChatForMenu = null;
 
 
 // =========================================================
+// INTERNAL FLAGS
+// =========================================================
+
+let chatControlsInitialized = false;
+let outsideMenuListenerInitialized = false;
+
+
+// =========================================================
+// LOCAL STORAGE KEYS
+// =========================================================
+
+const CURRENT_CHAT_STORAGE_KEY =
+    "rag_current_chat_id";
+
+
+// =========================================================
+// SAVE CURRENT CHAT ID
+// =========================================================
+
+function saveCurrentChatId(chatId) {
+
+    if (!chatId) {
+
+        localStorage.removeItem(
+            CURRENT_CHAT_STORAGE_KEY
+        );
+
+        return;
+    }
+
+    localStorage.setItem(
+        CURRENT_CHAT_STORAGE_KEY,
+        chatId
+    );
+}
+
+
+// =========================================================
+// GET SAVED CURRENT CHAT ID
+// =========================================================
+
+function getSavedCurrentChatId() {
+
+    return localStorage.getItem(
+        CURRENT_CHAT_STORAGE_KEY
+    );
+}
+
+
+// =========================================================
 // LOAD ALL CHATS
 // =========================================================
 
 async function loadChats() {
 
     const container =
-        document.getElementById("recentChats");
+        document.getElementById(
+            "recentChats"
+        );
 
     if (!container) {
         return;
@@ -27,9 +79,17 @@ async function loadChats() {
 
     try {
 
-        const data = await getChats();
+        const data =
+            await getChats();
 
-        const chats = data?.chats || [];
+        const chats =
+            Array.isArray(data)
+                ? data
+                : (
+                    Array.isArray(data?.chats)
+                        ? data.chats
+                        : []
+                );
 
         renderChats(chats);
 
@@ -50,13 +110,44 @@ async function loadChats() {
 
 
 // =========================================================
+// GET CHAT ID FROM BACKEND OBJECT
+// =========================================================
+
+function getChatIdFromObject(chat) {
+
+    return (
+        chat?.chat_id ||
+        chat?.id ||
+        chat?.uuid ||
+        null
+    );
+}
+
+
+// =========================================================
+// GET CHAT TITLE FROM BACKEND OBJECT
+// =========================================================
+
+function getChatTitleFromObject(chat) {
+
+    return (
+        chat?.title ||
+        chat?.name ||
+        "New Chat"
+    );
+}
+
+
+// =========================================================
 // RENDER CHAT LIST
 // =========================================================
 
 function renderChats(chats) {
 
     const container =
-        document.getElementById("recentChats");
+        document.getElementById(
+            "recentChats"
+        );
 
     if (!container) {
         return;
@@ -64,7 +155,7 @@ function renderChats(chats) {
 
     container.innerHTML = "";
 
-    if (!chats.length) {
+    if (!Array.isArray(chats) || !chats.length) {
 
         container.innerHTML = `
             <div class="chat-loading">
@@ -78,26 +169,49 @@ function renderChats(chats) {
 
     chats.forEach(chat => {
 
+        const chatId =
+            getChatIdFromObject(chat);
+
+        if (!chatId) {
+            return;
+        }
+
+
+        // =====================================================
+        // ROW
+        // =====================================================
+
         const row =
-            document.createElement("div");
+            document.createElement(
+                "div"
+            );
 
-        row.className = "chat-row";
+        row.className =
+            "chat-row";
+
+        row.dataset.chatId =
+            chatId;
 
 
-        // =================================================
+        // =====================================================
         // CHAT BUTTON
-        // =================================================
+        // =====================================================
 
         const chatButton =
-            document.createElement("button");
+            document.createElement(
+                "button"
+            );
 
         chatButton.className =
             "chat-item";
 
+        chatButton.type =
+            "button";
+
 
         if (
             currentChatId &&
-            chat.chat_id === currentChatId
+            String(chatId) === String(currentChatId)
         ) {
 
             chatButton.classList.add(
@@ -106,36 +220,52 @@ function renderChats(chats) {
         }
 
 
+        // =====================================================
+        // CHAT TITLE
+        // =====================================================
+
         const title =
-            document.createElement("span");
+            document.createElement(
+                "span"
+            );
 
         title.className =
             "chat-item-title";
 
         title.textContent =
-            chat.title || "New Chat";
+            getChatTitleFromObject(chat);
 
 
-        chatButton.appendChild(title);
+        chatButton.appendChild(
+            title
+        );
 
+
+        // =====================================================
+        // OPEN CHAT
+        // =====================================================
 
         chatButton.addEventListener(
             "click",
-            async () => {
+            async event => {
+
+                event.stopPropagation();
 
                 await selectChat(
-                    chat.chat_id
+                    chatId
                 );
             }
         );
 
 
-        // =================================================
+        // =====================================================
         // THREE DOT BUTTON
-        // =================================================
+        // =====================================================
 
         const menuButton =
-            document.createElement("button");
+            document.createElement(
+                "button"
+            );
 
         menuButton.className =
             "chat-menu-btn";
@@ -154,19 +284,21 @@ function renderChats(chats) {
             "click",
             event => {
 
+                event.preventDefault();
+
                 event.stopPropagation();
 
                 openChatContextMenu(
-                    chat.chat_id,
+                    chatId,
                     menuButton
                 );
             }
         );
 
 
-        // =================================================
+        // =====================================================
         // BUILD ROW
-        // =================================================
+        // =====================================================
 
         row.appendChild(
             chatButton
@@ -196,10 +328,12 @@ async function handleNewChat() {
             "Creating new chat..."
         );
 
+
         const data =
             await createChat();
 
-        if (!data?.chat_id) {
+
+        if (!data?.chat_id && !data?.id) {
 
             throw new Error(
                 "Server did not return a chat ID."
@@ -208,27 +342,74 @@ async function handleNewChat() {
 
 
         currentChatId =
-            data.chat_id;
+            data.chat_id ||
+            data.id;
 
 
-        // Clear current conversation
+        saveCurrentChatId(
+            currentChatId
+        );
 
-        clearChatInterface();
+
+        // =====================================================
+        // CLEAR OLD UI
+        // =====================================================
+
+        if (
+            typeof clearChatInterface ===
+            "function"
+        ) {
+
+            clearChatInterface();
+        }
 
 
-        // Reload sidebar
+        if (
+            typeof hideSources ===
+            "function"
+        ) {
+
+            hideSources();
+        }
+
+
+        // =====================================================
+        // CLEAR DOCUMENT LIBRARY
+        // =====================================================
+
+        try {
+
+            localStorage.removeItem(
+                `rag_documents_${currentChatId}`
+            );
+
+        } catch (error) {
+
+            console.warn(
+                "Could not clear document cache:",
+                error
+            );
+        }
+
+
+        if (
+            typeof renderDocumentLibrary ===
+            "function"
+        ) {
+
+            renderDocumentLibrary();
+        }
+
+
+        // =====================================================
+        // REFRESH SIDEBAR
+        // =====================================================
 
         await loadChats();
 
+        updateActiveChatStyles();
 
-        // Highlight new chat
-
-        highlightCurrentChat();
-
-
-        setStatus(
-            ""
-        );
+        setStatus("");
 
 
     } catch (error) {
@@ -247,10 +428,15 @@ async function handleNewChat() {
 
 
 // =========================================================
-// SELECT CHAT
+// SELECT / OPEN CHAT
 // =========================================================
 
 async function selectChat(chatId) {
+
+    if (!chatId) {
+        return;
+    }
+
 
     try {
 
@@ -259,64 +445,164 @@ async function selectChat(chatId) {
         );
 
 
+        // =====================================================
+        // SET CURRENT CHAT
+        // =====================================================
+
         currentChatId =
             chatId;
 
+        saveCurrentChatId(
+            chatId
+        );
 
-        highlightCurrentChat();
+
+        updateActiveChatStyles();
 
 
-        // -------------------------------------------------
-        // Get chat information
-        // -------------------------------------------------
+        // =====================================================
+        // LOAD CHAT
+        // =====================================================
 
         const chat =
-            await getChat(chatId);
+            await getChat(
+                chatId
+            );
 
 
-        // -------------------------------------------------
-        // Get messages
-        // -------------------------------------------------
+        console.log(
+            "Opened chat:",
+            chat
+        );
 
-        const data =
+
+        // =====================================================
+        // LOAD MESSAGES
+        // =====================================================
+
+        const messageData =
             await getChatMessages(
                 chatId
             );
 
 
         const messages =
-            data?.messages || [];
+            Array.isArray(messageData)
+                ? messageData
+                : (
+                    Array.isArray(messageData?.messages)
+                        ? messageData.messages
+                        : []
+                );
 
 
-        // -------------------------------------------------
-        // Render conversation
-        // -------------------------------------------------
+        // =====================================================
+        // LOAD FILES
+        // =====================================================
 
-        clearChatInterface();
+        let files = [];
 
+        try {
 
-        if (messages.length) {
+            const fileData =
+                await getChatFiles(
+                    chatId
+                );
 
-            renderMessages(
-                messages
+            files =
+                normalizeChatFiles(
+                    fileData
+                );
+
+            console.log(
+                "Loaded chat files:",
+                files
             );
 
-        } else {
+        } catch (fileError) {
 
-            showEmptyState();
+            console.warn(
+                "Could not load chat files:",
+                fileError
+            );
+
+            files = [];
         }
 
 
-        // -------------------------------------------------
-        // Hide sources from previous chat
-        // -------------------------------------------------
+        // =====================================================
+        // CLEAR CURRENT UI
+        // =====================================================
 
-        hideSources();
+        if (
+            typeof clearChatInterface ===
+            "function"
+        ) {
+
+            clearChatInterface();
+        }
 
 
-        setStatus(
-            ""
+        // =====================================================
+        // RENDER MESSAGES
+        // =====================================================
+
+        if (messages.length) {
+
+            if (
+                typeof renderMessages ===
+                "function"
+            ) {
+
+                renderMessages(
+                    messages
+                );
+            }
+
+        } else {
+
+            if (
+                typeof showEmptyState ===
+                "function"
+            ) {
+
+                showEmptyState();
+            }
+        }
+
+
+        // =====================================================
+        // HIDE OLD SOURCES
+        // =====================================================
+
+        if (
+            typeof hideSources ===
+            "function"
+        ) {
+
+            hideSources();
+        }
+
+
+        // =====================================================
+        // RESTORE DOCUMENTS
+        // =====================================================
+
+        restoreChatDocuments(
+            chatId,
+            files
         );
+
+
+        // =====================================================
+        // REFRESH SIDEBAR
+        // =====================================================
+
+        await loadChats();
+
+        updateActiveChatStyles();
+
+        setStatus("");
 
 
     } catch (error) {
@@ -335,28 +621,265 @@ async function selectChat(chatId) {
 
 
 // =========================================================
+// NORMALIZE CHAT FILE RESPONSE
+// =========================================================
+
+function normalizeChatFiles(fileData) {
+
+    let files = [];
+
+
+    // =====================================================
+    // POSSIBLE BACKEND RESPONSE FORMATS
+    // =====================================================
+
+    if (
+        Array.isArray(fileData)
+    ) {
+
+        files =
+            fileData;
+
+    } else if (
+        Array.isArray(fileData?.files)
+    ) {
+
+        files =
+            fileData.files;
+
+    } else if (
+        Array.isArray(fileData?.documents)
+    ) {
+
+        files =
+            fileData.documents;
+    }
+
+
+    return files.map(file => {
+
+        const fileName =
+            file?.file_name ||
+            file?.filename ||
+            file?.name ||
+            "Unnamed document";
+
+
+        const extension =
+            getFileExtension(
+                fileName
+            );
+
+
+        return {
+
+            id:
+                file?.id ||
+                file?.file_id ||
+                null,
+
+            file_name:
+                fileName,
+
+            filename:
+                fileName,
+
+            name:
+                fileName,
+
+            file_type:
+                file?.file_type ||
+                file?.mime_type ||
+                file?.type ||
+                extension,
+
+            file_size:
+                file?.file_size ??
+                file?.size ??
+                0,
+
+            chunks:
+                file?.chunks ??
+                file?.chunk_count ??
+                file?.chunks_count ??
+                0,
+
+            uploaded_at:
+                file?.uploaded_at ||
+                file?.created_at ||
+                null
+        };
+
+    });
+}
+
+
+// =========================================================
+// GET FILE EXTENSION
+// =========================================================
+
+function getFileExtension(fileName) {
+
+    if (!fileName) {
+        return "";
+    }
+
+
+    const parts =
+        String(fileName)
+            .split(".");
+
+
+    if (
+        parts.length < 2
+    ) {
+
+        return "";
+    }
+
+
+    return parts
+        .pop()
+        .toUpperCase();
+}
+
+
+// =========================================================
+// RESTORE CHAT DOCUMENTS
+// =========================================================
+
+function restoreChatDocuments(
+    chatId,
+    files
+) {
+
+    if (!chatId) {
+        return;
+    }
+
+
+    const documents =
+        Array.isArray(files)
+            ? files
+            : [];
+
+
+    console.log(
+        `Restoring ${documents.length} document(s) for chat ${chatId}`
+    );
+
+
+    // =====================================================
+    // SAVE BACKEND FILES TO LOCAL CACHE
+    // =====================================================
+
+    try {
+
+        localStorage.setItem(
+            `rag_documents_${chatId}`,
+            JSON.stringify(
+                documents
+            )
+        );
+
+    } catch (error) {
+
+        console.warn(
+            "Could not cache chat documents:",
+            error
+        );
+    }
+
+
+    // =====================================================
+    // USE EXISTING DOCUMENT CACHE FUNCTION IF AVAILABLE
+    // =====================================================
+
+    if (
+        typeof saveChatDocuments ===
+        "function"
+    ) {
+
+        try {
+
+            saveChatDocuments(
+                chatId,
+                documents
+            );
+
+        } catch (error) {
+
+            console.warn(
+                "saveChatDocuments failed:",
+                error
+            );
+        }
+    }
+
+
+    // =====================================================
+    // RENDER DOCUMENT LIBRARY
+    // =====================================================
+
+    if (
+        typeof renderDocumentLibrary ===
+        "function"
+    ) {
+
+        renderDocumentLibrary();
+    }
+}
+
+
+// =========================================================
+// UPDATE ACTIVE CHAT STYLES
+// =========================================================
+
+function updateActiveChatStyles() {
+
+    const rows =
+        document.querySelectorAll(
+            ".chat-row"
+        );
+
+
+    rows.forEach(row => {
+
+        const button =
+            row.querySelector(
+                ".chat-item"
+            );
+
+        if (!button) {
+            return;
+        }
+
+
+        const rowChatId =
+            row.dataset.chatId;
+
+
+        button.classList.toggle(
+            "active",
+            Boolean(
+                currentChatId &&
+                String(rowChatId) ===
+                String(currentChatId)
+            )
+        );
+    });
+}
+
+
+// =========================================================
 // HIGHLIGHT CURRENT CHAT
 // =========================================================
 
-function highlightCurrentChat() {
+async function highlightCurrentChat() {
 
-    const chatButtons =
-        document.querySelectorAll(
-            ".chat-item"
-        );
+    await loadChats();
 
-    chatButtons.forEach(button => {
-
-        button.classList.remove(
-            "active"
-        );
-    });
-
-
-    // Re-render is the safest way to ensure
-    // active state remains synchronized.
-
-    loadChats();
+    updateActiveChatStyles();
 }
 
 
@@ -380,6 +903,11 @@ function openChatContextMenu(
 
 
     if (!menu) {
+
+        console.warn(
+            "chatContextMenu element not found."
+        );
+
         return;
     }
 
@@ -387,6 +915,9 @@ function openChatContextMenu(
     const rect =
         button.getBoundingClientRect();
 
+
+    menu.style.position =
+        "fixed";
 
     menu.style.left =
         `${rect.right + 8}px`;
@@ -467,25 +998,79 @@ async function handleDeleteChat() {
         );
 
 
-        // If deleted chat was active
+        // =====================================================
+        // REMOVE LOCAL DOCUMENT CACHE
+        // =====================================================
+
+        try {
+
+            localStorage.removeItem(
+                `rag_documents_${chatId}`
+            );
+
+        } catch (error) {
+
+            console.warn(
+                "Could not remove document cache:",
+                error
+            );
+        }
+
+
+        // =====================================================
+        // IF ACTIVE CHAT WAS DELETED
+        // =====================================================
 
         if (
-            currentChatId === chatId
+            String(currentChatId) ===
+            String(chatId)
         ) {
 
             currentChatId =
                 null;
 
-            clearChatInterface();
+            saveCurrentChatId(
+                null
+            );
+
+
+            if (
+                typeof clearChatInterface ===
+                "function"
+            ) {
+
+                clearChatInterface();
+            }
+
+
+            if (
+                typeof hideSources ===
+                "function"
+            ) {
+
+                hideSources();
+            }
+
+
+            if (
+                typeof renderDocumentLibrary ===
+                "function"
+            ) {
+
+                renderDocumentLibrary();
+            }
         }
 
 
+        // =====================================================
+        // RELOAD SIDEBAR
+        // =====================================================
+
         await loadChats();
 
+        updateActiveChatStyles();
 
-        setStatus(
-            ""
-        );
+        setStatus("");
 
 
     } catch (error) {
@@ -506,16 +1091,6 @@ async function handleDeleteChat() {
 // =========================================================
 // RENAME CHAT
 // =========================================================
-//
-// Backend currently does NOT expose a rename endpoint.
-//
-// Therefore we intentionally do not fake this functionality.
-//
-// Once we add:
-// PATCH /api/chats/{chat_id}
-//
-// we will implement rename here.
-// =========================================================
 
 async function handleRenameChat() {
 
@@ -531,9 +1106,306 @@ async function handleRenameChat() {
     closeChatContextMenu();
 
 
-    setStatus(
-        "Rename is not available from the API yet."
-    );
+    try {
+
+        // =====================================================
+        // GET CURRENT TITLE
+        // =====================================================
+
+        const chat =
+            await getChat(
+                chatId
+            );
+
+
+        const currentTitle =
+            getChatTitleFromObject(
+                chat
+            );
+
+
+        // =====================================================
+        // ASK FOR NEW TITLE
+        // =====================================================
+
+        const newTitle =
+            window.prompt(
+                "Enter a new chat name:",
+                currentTitle
+            );
+
+
+        if (
+            newTitle === null
+        ) {
+
+            return;
+        }
+
+
+        const cleanedTitle =
+            newTitle
+                .trim()
+                .replace(
+                    /\s+/g,
+                    " "
+                );
+
+
+        // =====================================================
+        // VALIDATION
+        // =====================================================
+
+        if (!cleanedTitle) {
+
+            setStatus(
+                "Chat name cannot be empty.",
+                true
+            );
+
+            return;
+        }
+
+
+        if (
+            cleanedTitle.length > 100
+        ) {
+
+            setStatus(
+                "Chat name must be 100 characters or less.",
+                true
+            );
+
+            return;
+        }
+
+
+        // =====================================================
+        // UPDATE BACKEND
+        // =====================================================
+
+        setStatus(
+            "Renaming chat..."
+        );
+
+
+        const updatedChat =
+            await updateChatTitle(
+                chatId,
+                cleanedTitle
+            );
+
+
+        console.log(
+            "Chat renamed successfully:",
+            updatedChat
+        );
+
+
+        // =====================================================
+        // IMMEDIATELY UPDATE SIDEBAR
+        // =====================================================
+
+        const row =
+            document.querySelector(
+                `.chat-row[data-chat-id="${CSS.escape(String(chatId))}"]`
+            );
+
+
+        if (row) {
+
+            const titleElement =
+                row.querySelector(
+                    ".chat-item-title"
+                );
+
+            if (titleElement) {
+
+                titleElement.textContent =
+                    cleanedTitle;
+            }
+        }
+
+
+        // =====================================================
+        // REFRESH FROM BACKEND
+        // =====================================================
+
+        await loadChats();
+
+        updateActiveChatStyles();
+
+        setStatus("");
+
+
+    } catch (error) {
+
+        console.error(
+            "Could not rename chat:",
+            error
+        );
+
+        setStatus(
+            `Could not rename chat: ${error.message}`,
+            true
+        );
+    }
+}
+
+
+// =========================================================
+// AUTOMATIC CHAT TITLE
+// =========================================================
+//
+// First question:
+//
+// "what is cloud computing?"
+//
+// becomes:
+//
+// "What is cloud computing"
+//
+// IMPORTANT:
+// Manual rename is NEVER overwritten.
+// =========================================================
+
+async function autoNameChat(
+    chatId,
+    question
+) {
+
+    if (
+        !chatId ||
+        !question
+    ) {
+
+        return;
+    }
+
+
+    try {
+
+        const cleanQuestion =
+            question
+                .trim()
+                .replace(
+                    /\s+/g,
+                    " "
+                );
+
+
+        if (!cleanQuestion) {
+            return;
+        }
+
+
+        // =====================================================
+        // GET CURRENT CHAT
+        // =====================================================
+
+        const chat =
+            await getChat(
+                chatId
+            );
+
+
+        const currentTitle =
+            chat?.title ||
+            chat?.name ||
+            "";
+
+
+        // =====================================================
+        // DON'T OVERWRITE MANUAL NAME
+        // =====================================================
+
+        if (
+            currentTitle &&
+            currentTitle.trim() &&
+            currentTitle.trim().toLowerCase() !==
+                "new chat"
+        ) {
+
+            return;
+        }
+
+
+        // =====================================================
+        // CREATE TITLE
+        // =====================================================
+
+        let title =
+            cleanQuestion;
+
+
+        // Remove ending punctuation
+
+        title =
+            title.replace(
+                /[.!?]+$/,
+                ""
+            );
+
+
+        // Capitalize first character
+
+        title =
+            title.charAt(0).toUpperCase() +
+            title.slice(1);
+
+
+        // Limit title length
+
+        if (
+            title.length > 60
+        ) {
+
+            title =
+                title
+                    .substring(
+                        0,
+                        57
+                    )
+                    .trim() +
+                "...";
+        }
+
+
+        // =====================================================
+        // UPDATE BACKEND
+        // =====================================================
+
+        await updateChatTitle(
+            chatId,
+            title
+        );
+
+
+        // =====================================================
+        // REFRESH SIDEBAR
+        // =====================================================
+
+        await loadChats();
+
+        updateActiveChatStyles();
+
+
+        console.log(
+            "Automatically renamed chat:",
+            title
+        );
+
+
+    } catch (error) {
+
+        // Automatic naming must NEVER
+        // break the question flow.
+
+        console.warn(
+            "Could not automatically name chat:",
+            error
+        );
+    }
 }
 
 
@@ -543,9 +1415,23 @@ async function handleRenameChat() {
 
 function initializeChatControls() {
 
-    // -----------------------------------------------------
-    // New Chat
-    // -----------------------------------------------------
+    // Prevent duplicate event listeners
+
+    if (
+        chatControlsInitialized
+    ) {
+
+        return;
+    }
+
+
+    chatControlsInitialized =
+        true;
+
+
+    // =====================================================
+    // NEW CHAT
+    // =====================================================
 
     const newChatButton =
         document.getElementById(
@@ -562,9 +1448,9 @@ function initializeChatControls() {
     }
 
 
-    // -----------------------------------------------------
-    // Delete
-    // -----------------------------------------------------
+    // =====================================================
+    // DELETE
+    // =====================================================
 
     const deleteButton =
         document.getElementById(
@@ -581,9 +1467,9 @@ function initializeChatControls() {
     }
 
 
-    // -----------------------------------------------------
-    // Rename
-    // -----------------------------------------------------
+    // =====================================================
+    // RENAME
+    // =====================================================
 
     const renameButton =
         document.getElementById(
@@ -600,27 +1486,157 @@ function initializeChatControls() {
     }
 
 
-    // -----------------------------------------------------
-    // Close menu when clicking elsewhere
-    // -----------------------------------------------------
+    // =====================================================
+    // CLOSE CONTEXT MENU
+    // =====================================================
+
+    if (
+        !outsideMenuListenerInitialized
+    ) {
+
+        outsideMenuListenerInitialized =
+            true;
+
+
+        document.addEventListener(
+            "click",
+            event => {
+
+                const menu =
+                    document.getElementById(
+                        "chatContextMenu"
+                    );
+
+
+                if (!menu) {
+                    return;
+                }
+
+
+                if (
+                    !menu.contains(
+                        event.target
+                    )
+                ) {
+
+                    closeChatContextMenu();
+                }
+            }
+        );
+    }
+}
+
+
+// =========================================================
+// INITIALIZE WHEN DOM IS READY
+// =========================================================
+
+function initializeChatsModule() {
+
+    initializeChatControls();
+
+    loadChats();
+}
+
+
+// =========================================================
+// EXPORT CHAT FUNCTIONS
+// =========================================================
+
+window.RAGChats = {
+
+    // State
+
+    getCurrentChatId: () =>
+        currentChatId,
+
+    setCurrentChatId: chatId => {
+
+        currentChatId =
+            chatId;
+
+        saveCurrentChatId(
+            chatId
+        );
+
+        updateActiveChatStyles();
+    },
+
+
+    // Loading
+
+    loadChats,
+
+    renderChats,
+
+    selectChat,
+
+    highlightCurrentChat,
+
+
+    // Creation
+
+    handleNewChat,
+
+
+    // Context menu
+
+    openChatContextMenu,
+
+    closeChatContextMenu,
+
+
+    // Chat actions
+
+    handleDeleteChat,
+
+    handleRenameChat,
+
+    autoNameChat,
+
+
+    // Documents
+
+    normalizeChatFiles,
+
+    restoreChatDocuments,
+
+
+    // State persistence
+
+    getSavedCurrentChatId,
+
+    saveCurrentChatId,
+
+
+    // Initialization
+
+    initializeChatControls,
+
+    initializeChatsModule
+};
+
+
+// =========================================================
+// AUTO INITIALIZE
+// =========================================================
+
+if (
+    document.readyState ===
+    "loading"
+) {
 
     document.addEventListener(
-        "click",
-        event => {
-
-            const menu =
-                document.getElementById(
-                    "chatContextMenu"
-                );
-
-
-            if (
-                menu &&
-                !menu.contains(event.target)
-            ) {
-
-                closeChatContextMenu();
-            }
-        }
+        "DOMContentLoaded",
+        initializeChatsModule
     );
+
+} else {
+
+    initializeChatsModule();
 }
+
+
+// =========================================================
+// END CHATS.JS
+// =========================================================
