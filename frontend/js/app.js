@@ -36,6 +36,19 @@ let isAsking = false;
 
 
 // =========================================================
+// YOUTUBE STATE
+// =========================================================
+//
+// When a YouTube video is loaded, this stores its URL.
+// sendQuestion() uses this URL to decide whether the
+// question should go through normal RAG or Level-2
+// multimodal YouTube analysis.
+// =========================================================
+
+let currentYouTubeUrl = "";
+
+
+// =========================================================
 // DOM HELPER
 // =========================================================
 
@@ -2136,16 +2149,88 @@ async function sendQuestion() {
         // for saving the question and answer.
         // =================================================
 
-        setStatus(
-            "Thinking..."
+        if (
+    currentYouTubeUrl &&
+    extractYouTubeVideoId(
+        currentYouTubeUrl
+    )
+) {
+
+    setStatus(
+        "Analyzing YouTube video..."
+    );
+
+} else {
+
+    setStatus(
+        "Thinking..."
+    );
+}
+
+
+        // =========================================================
+// CHOOSE QUESTION ENGINE
+// =========================================================
+//
+// If a YouTube video is currently loaded,
+// use Level-2 multimodal Gemini.
+//
+// Otherwise use normal document RAG.
+//
+// IMPORTANT:
+// Do NOT call saveChatMessage() here.
+// The backend saves the user question and answer.
+// =========================================================
+
+let response;
+
+
+if (
+    currentYouTubeUrl &&
+    extractYouTubeVideoId(
+        currentYouTubeUrl
+    )
+) {
+
+    // =====================================================
+    // YOUTUBE LEVEL 2 MULTIMODAL
+    // =====================================================
+
+    console.log(
+        "🎬 Sending question to YouTube multimodal backend..."
+    );
+
+
+    setStatus(
+        "Analyzing YouTube video..."
+    );
+
+
+    response =
+        await askYouTubeMultimodal(
+            currentChatId,
+            currentYouTubeUrl,
+            submittedQuestion
         );
 
 
-        const response =
-            await askDocuments(
-                currentChatId,
-                submittedQuestion
-            );
+} else {
+
+    // =====================================================
+    // NORMAL DOCUMENT RAG
+    // =====================================================
+
+    console.log(
+        "📄 Sending question to document RAG..."
+    );
+
+
+    response =
+        await askDocuments(
+            currentChatId,
+            submittedQuestion
+        );
+}
 
 
         console.log(
@@ -2604,7 +2689,237 @@ function hideYouTubeVideo() {
 // YOUTUBE UI
 // =========================================================
 
-function initializeYouTubeUI() {
+// =========================================================
+// YOUTUBE — LEVEL 2 MULTIMODAL
+// =========================================================
+
+
+// =========================================================
+// EXTRACT YOUTUBE VIDEO ID
+// =========================================================
+
+function extractYouTubeVideoId(
+    url
+) {
+
+    if (!url) {
+        return null;
+    }
+
+
+    try {
+
+        const parsed =
+            new URL(url);
+
+
+        // =====================================================
+        // youtube.com/watch?v=...
+        // =====================================================
+
+        if (
+            parsed.hostname.includes(
+                "youtube.com"
+            )
+        ) {
+
+            const id =
+                parsed.searchParams.get(
+                    "v"
+                );
+
+
+            if (id) {
+
+                return id;
+            }
+        }
+
+
+        // =====================================================
+        // youtu.be/VIDEO_ID
+        // =====================================================
+
+        if (
+            parsed.hostname.includes(
+                "youtu.be"
+            )
+        ) {
+
+            return parsed.pathname
+                .replace(
+                    "/",
+                    ""
+                )
+                .split("?")[0];
+        }
+
+
+        // =====================================================
+        // youtube.com/embed/VIDEO_ID
+        // =====================================================
+
+        if (
+            parsed.pathname.startsWith(
+                "/embed/"
+            )
+        ) {
+
+            return parsed.pathname
+                .split(
+                    "/embed/"
+                )[1]
+                ?.split("/")[0] ||
+                null;
+        }
+
+
+    } catch (error) {
+
+        console.warn(
+            "Invalid YouTube URL:",
+            error
+        );
+    }
+
+
+    return null;
+}
+
+
+// =========================================================
+// SHOW YOUTUBE VIDEO
+// =========================================================
+
+function showYouTubeVideo(
+    url
+) {
+
+    const panel =
+        $("youtubePanel");
+
+    const iframe =
+        $("youtubePlayer");
+
+
+    if (
+        !panel ||
+        !iframe
+    ) {
+
+        console.warn(
+            "YouTube panel/player not found."
+        );
+
+        return;
+    }
+
+
+    const videoId =
+        extractYouTubeVideoId(
+            url
+        );
+
+
+    if (!videoId) {
+
+        setStatus(
+            "Please enter a valid YouTube URL.",
+            true
+        );
+
+        return;
+    }
+
+
+    iframe.src =
+        `https://www.youtube.com/embed/${videoId}?enablejsapi=1`;
+
+
+    panel.classList.remove(
+        "hidden"
+    );
+
+
+    panel.style.display =
+        "block";
+
+
+    setStatus(
+        "YouTube video loaded. Ask a question about the video."
+    );
+}
+
+
+// =========================================================
+// HIDE YOUTUBE VIDEO
+// =========================================================
+
+function hideYouTubeVideo() {
+
+    const panel =
+        $("youtubePanel");
+
+    const iframe =
+        $("youtubePlayer");
+
+
+    if (iframe) {
+
+        iframe.src =
+            "";
+    }
+
+
+    if (panel) {
+
+        panel.classList.add(
+            "hidden"
+        );
+
+
+        panel.style.display =
+            "none";
+    }
+
+
+    // ---------------------------------------------------------
+    // IMPORTANT:
+    // Clear active YouTube mode.
+    // ---------------------------------------------------------
+
+    currentYouTubeUrl =
+        "";
+
+
+    const input =
+        $("youtubeUrl");
+
+
+    if (input) {
+
+        input.value =
+            "";
+    }
+
+
+    setStatus("");
+}
+
+
+// =========================================================
+// ANALYZE YOUTUBE VIDEO
+// =========================================================
+//
+// This does NOT consume a Gemini request.
+//
+// It only validates and loads the video.
+//
+// The actual Gemini request happens when the user
+// asks a question through sendQuestion().
+// =========================================================
+
+async function initializeYouTubeUI() {
 
     const closeBtn =
         $("closeYoutubeBtn");
@@ -2615,6 +2930,10 @@ function initializeYouTubeUI() {
     const analyzeBtn =
         $("analyzeYoutubeBtn");
 
+
+    // =====================================================
+    // CLOSE BUTTON
+    // =====================================================
 
     if (closeBtn) {
 
@@ -2629,6 +2948,10 @@ function initializeYouTubeUI() {
     }
 
 
+    // =====================================================
+    // ANALYZE / LOAD BUTTON
+    // =====================================================
+
     if (
         analyzeBtn &&
         input
@@ -2641,6 +2964,10 @@ function initializeYouTubeUI() {
                 const url =
                     input.value.trim();
 
+
+                // -------------------------------------------------
+                // VALIDATE URL
+                // -------------------------------------------------
 
                 if (!url) {
 
@@ -2670,15 +2997,92 @@ function initializeYouTubeUI() {
                 }
 
 
+                // -------------------------------------------------
+                // ENSURE CHAT
+                // -------------------------------------------------
+
+                try {
+
+                    await ensureCurrentChat();
+
+                } catch (error) {
+
+                    console.error(
+                        "Could not create chat for YouTube:",
+                        error
+                    );
+
+
+                    setStatus(
+                        error.message ||
+                        "Could not create a chat.",
+                        true
+                    );
+
+                    return;
+                }
+
+
+                if (!currentChatId) {
+
+                    setStatus(
+                        "No active chat available.",
+                        true
+                    );
+
+                    return;
+                }
+
+
+                // -------------------------------------------------
+                // STORE ACTIVE YOUTUBE URL
+                // -------------------------------------------------
+
+                currentYouTubeUrl =
+                    url;
+
+
+                // -------------------------------------------------
+                // SHOW VIDEO
+                // -------------------------------------------------
+
                 showYouTubeVideo(
                     url
                 );
 
 
+                // -------------------------------------------------
+                // REFRESH CHAT SIDEBAR
+                // -------------------------------------------------
+
+                if (
+                    typeof loadChats ===
+                    "function"
+                ) {
+
+                    try {
+
+                        await loadChats();
+
+                    } catch (error) {
+
+                        console.warn(
+                            "Could not refresh chats after YouTube load:",
+                            error
+                        );
+                    }
+                }
+
+
                 setStatus(
-                    "YouTube video loaded. Transcript analysis endpoint is not connected yet."
+                    "YouTube video loaded. Now ask your question below."
                 );
 
+
+                console.log(
+                    "🎬 Active YouTube video:",
+                    currentYouTubeUrl
+                );
             }
         );
     }
@@ -2754,6 +3158,9 @@ async function initializeApiHealth() {
 // =========================================================
 
 async function restoreSavedChat() {
+
+    currentYouTubeUrl = "";
+    hideYouTubeVideo();
 
     let savedChatId = null;
 

@@ -290,6 +290,49 @@ def _format_timestamp(seconds):
     return f"{minutes}:{secs:02d}"
 
 
+def _get_youtube_url_for_question(retrieved_metadatas, youtube_videos):
+    """
+    Select the YouTube video to use for Level-2 multimodal analysis.
+
+    Priority:
+        1. A YouTube URL from the retrieved chunks.
+        2. The first indexed YouTube video in the current chat.
+    """
+    for metadata in retrieved_metadatas or []:
+        if not isinstance(metadata, dict):
+            continue
+
+        if metadata.get("source_type") != "youtube":
+            continue
+
+        youtube_url = metadata.get("youtube_url")
+
+        if youtube_url:
+            return youtube_url
+
+        video_id = metadata.get("video_id")
+
+        if video_id:
+            return (
+                "https://www.youtube.com/watch?v="
+                f"{quote(str(video_id))}"
+            )
+
+    for video_id, video in (youtube_videos or {}).items():
+        youtube_url = video.get("youtube_url")
+
+        if youtube_url:
+            return youtube_url
+
+        if video_id:
+            return (
+                "https://www.youtube.com/watch?v="
+                f"{quote(str(video_id))}"
+            )
+
+    return None
+
+
 def _render_youtube_player(youtube_videos):
     """Render the Level-1 YouTube player only for chats containing YouTube sources."""
     if not youtube_videos:
@@ -966,8 +1009,21 @@ with st.sidebar:
                         "file_name",
                         f"YouTube Video - {video_id}"
                     ),
+                    "youtube_url": metadata.get(
+                        "youtube_url"
+                    ),
                     "segments": 0,
                 }
+
+            # Keep the URL if an older metadata row did not have it
+            # but a newer row does.
+            if (
+                not youtube_videos[video_id].get("youtube_url")
+                and metadata.get("youtube_url")
+            ):
+                youtube_videos[video_id]["youtube_url"] = (
+                    metadata.get("youtube_url")
+                )
 
             youtube_videos[video_id]["segments"] += 1
 
@@ -2694,19 +2750,73 @@ if question and assistant_mode == "Document Q&A":
                 else {}
             )
 
+            if not isinstance(metadata, dict):
+                metadata = {}
+
             file_name = metadata.get(
                 "file_name",
                 "Unknown file"
             )
 
-            page = metadata.get(
-                "page",
-                "Unknown"
+            source_type = metadata.get(
+                "source_type",
+                "document"
             )
 
-            context_parts.append(
-                f"""
+            if source_type == "youtube":
+
+                start_time = metadata.get(
+                    "start_time",
+                    0
+                )
+
+                video_id = metadata.get(
+                    "video_id",
+                    ""
+                )
+
+                youtube_url = metadata.get(
+                    "youtube_url",
+                    ""
+                )
+
+                timestamp = _format_timestamp(
+                    start_time
+                )
+
+                context_parts.append(
+                    f"""
 SOURCE {i}
+
+Source Type: YouTube
+
+Video: {file_name}
+
+Video ID: {video_id}
+
+YouTube URL: {youtube_url}
+
+Timestamp: [{timestamp}]
+
+Timestamp Seconds: {start_time}
+
+Transcript:
+{document}
+"""
+                )
+
+            else:
+
+                page = metadata.get(
+                    "page",
+                    "Unknown"
+                )
+
+                context_parts.append(
+                    f"""
+SOURCE {i}
+
+Source Type: Document
 
 File: {file_name}
 
@@ -2715,7 +2825,7 @@ Location: {page}
 Content:
 {document}
 """
-            )
+                )
 
         retrieved_context = "\n".join(
             context_parts
@@ -3125,27 +3235,101 @@ RETRIEVED DOCUMENT CONTEXT:
 
 
         # =================================================
-        # NORMAL DOCUMENT Q&A MODE
+        # NORMAL DOCUMENT Q&A / LEVEL-2 YOUTUBE Q&A
         # =================================================
 
-        with st.spinner(
-            "✨ Generating answer..."
-        ):
+        # -------------------------------------------------
+        # FIND WHETHER THIS CHAT CONTAINS A YOUTUBE VIDEO
+        # -------------------------------------------------
 
-            try:
+        youtube_url_for_analysis = (
+            _get_youtube_url_for_question(
+                retrieved_metadatas=metadatas,
+                youtube_videos=youtube_videos
+            )
+        )
 
-                answer = generate_response(
-                    context=final_context,
-                    question=question
-                )
+        # -------------------------------------------------
+        # LEVEL 2 — TRUE MULTIMODAL YOUTUBE ANALYSIS
+        # -------------------------------------------------
 
-            except Exception as e:
+        if youtube_url_for_analysis:
 
-                answer = (
-                    "Sorry, I could not generate "
-                    "an answer right now.\n\n"
-                    f"Error: {e}"
-                )
+            with st.spinner(
+                "🎬 Gemini is watching the YouTube video "
+                "and analyzing audio + visuals..."
+            ):
+
+                try:
+
+                    answer = generate_youtube_multimodal_response(
+                        video_url=youtube_url_for_analysis,
+                        context=final_context,
+                        question=question
+                    )
+
+                except Exception as multimodal_error:
+
+                    # -------------------------------------------------
+                    # SAFE FALLBACK
+                    # -------------------------------------------------
+                    # If Gemini's multimodal video request fails,
+                    # preserve the existing transcript RAG behavior.
+                    st.warning(
+                        "⚠️ Multimodal video analysis failed. "
+                        "Falling back to transcript RAG."
+                    )
+
+                    with st.expander(
+                        "Technical details"
+                    ):
+                        st.code(
+                            str(multimodal_error)
+                        )
+
+                    with st.spinner(
+                        "✨ Generating transcript-based answer..."
+                    ):
+
+                        try:
+
+                            answer = generate_response(
+                                context=final_context,
+                                question=question
+                            )
+
+                        except Exception as e:
+
+                            answer = (
+                                "Sorry, I could not generate "
+                                "an answer right now.\n\n"
+                                f"Error: {e}"
+                            )
+
+        # -------------------------------------------------
+        # NORMAL DOCUMENT RAG
+        # -------------------------------------------------
+
+        else:
+
+            with st.spinner(
+                "✨ Generating answer..."
+            ):
+
+                try:
+
+                    answer = generate_response(
+                        context=final_context,
+                        question=question
+                    )
+
+                except Exception as e:
+
+                    answer = (
+                        "Sorry, I could not generate "
+                        "an answer right now.\n\n"
+                        f"Error: {e}"
+                    )
 
         # -------------------------------------------------
         # GROUP SOURCES

@@ -748,6 +748,10 @@ function getFileExtension(fileName) {
 // RESTORE CHAT DOCUMENTS
 // =========================================================
 
+// =========================================================
+// RESTORE CHAT DOCUMENTS
+// =========================================================
+
 function restoreChatDocuments(
     chatId,
     files
@@ -757,6 +761,9 @@ function restoreChatDocuments(
         return;
     }
 
+    // ---------------------------------------------------------
+    // Backend is the source of truth.
+    // ---------------------------------------------------------
 
     const documents =
         Array.isArray(files)
@@ -765,13 +772,18 @@ function restoreChatDocuments(
 
 
     console.log(
-        `Restoring ${documents.length} document(s) for chat ${chatId}`
+        "Restoring documents for chat:",
+        chatId,
+        documents
     );
 
 
-    // =====================================================
-    // SAVE BACKEND FILES TO LOCAL CACHE
-    // =====================================================
+    // ---------------------------------------------------------
+    // Store documents in the current chat state.
+    //
+    // This prevents the document list from disappearing
+    // when the UI/sidebar is refreshed.
+    // ---------------------------------------------------------
 
     try {
 
@@ -791,35 +803,24 @@ function restoreChatDocuments(
     }
 
 
-    // =====================================================
-    // USE EXISTING DOCUMENT CACHE FUNCTION IF AVAILABLE
-    // =====================================================
+    // ---------------------------------------------------------
+    // Also expose the documents globally if the existing
+    // document-library code uses a global variable.
+    // ---------------------------------------------------------
 
     if (
-        typeof saveChatDocuments ===
-        "function"
+        typeof window !== "undefined"
     ) {
 
-        try {
+        window.currentChatDocuments =
+            documents;
 
-            saveChatDocuments(
-                chatId,
-                documents
-            );
-
-        } catch (error) {
-
-            console.warn(
-                "saveChatDocuments failed:",
-                error
-            );
-        }
     }
 
 
-    // =====================================================
-    // RENDER DOCUMENT LIBRARY
-    // =====================================================
+    // ---------------------------------------------------------
+    // Render document library.
+    // ---------------------------------------------------------
 
     if (
         typeof renderDocumentLibrary ===
@@ -827,6 +828,7 @@ function restoreChatDocuments(
     ) {
 
         renderDocumentLibrary();
+
     }
 }
 

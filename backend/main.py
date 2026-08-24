@@ -1,9 +1,9 @@
 import os
+import uuid
+
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-
-import tempfile
 
 from src.services.chat_manager import (
     create_chat,
@@ -14,12 +14,15 @@ from src.services.chat_manager import (
     save_message,
     update_chat_title,
     get_chat_files,
+    add_file,
 )
 
 from src.vectorstore.chroma_store import get_chat_collection
 from src.retriever.retriever import retrieve_chunks
-from src.llm.gemini import generate_response
-
+from src.llm.gemini import (
+    generate_response,
+    generate_youtube_multimodal_response,
+)
 from src.services.document_service import process_document
 
 
@@ -57,6 +60,10 @@ app.add_middleware(
 # REQUEST MODELS
 # =========================================================
 
+# =========================================================
+# REQUEST MODELS
+# =========================================================
+
 class MessageRequest(BaseModel):
     role: str
     content: str
@@ -68,6 +75,11 @@ class AskRequest(BaseModel):
 
 class ChatUpdateRequest(BaseModel):
     title: str
+
+
+class YouTubeAskRequest(BaseModel):
+    video_url: str
+    question: str
 
 
 # =========================================================
@@ -171,6 +183,7 @@ def update_chat(
             detail="Chat not found",
         )
 
+
     # -----------------------------------------------------
     # VALIDATE TITLE
     # -----------------------------------------------------
@@ -184,11 +197,13 @@ def update_chat(
             detail="Chat title cannot be empty",
         )
 
+
     # -----------------------------------------------------
     # LIMIT TITLE LENGTH
     # -----------------------------------------------------
 
     title = title[:100]
+
 
     # -----------------------------------------------------
     # UPDATE TITLE
@@ -198,6 +213,7 @@ def update_chat(
         chat_id,
         title,
     )
+
 
     # -----------------------------------------------------
     # GET UPDATED CHAT
@@ -233,6 +249,7 @@ def remove_chat(
             detail="Chat not found",
         )
 
+
     delete_chat(
         chat_id
     )
@@ -266,6 +283,7 @@ def get_files_for_chat(
             status_code=404,
             detail="Chat not found",
         )
+
 
     # -----------------------------------------------------
     # GET FILES
@@ -302,6 +320,7 @@ def get_chat_messages(
             detail="Chat not found",
         )
 
+
     messages = get_messages(
         chat_id
     )
@@ -333,15 +352,18 @@ def add_chat_message(
             detail="Chat not found",
         )
 
+
     message = {
         "role": request.role,
         "content": request.content,
     }
 
+
     save_message(
         chat_id,
         message,
     )
+
 
     return {
         "success": True,
@@ -375,6 +397,7 @@ async def upload_document(
             detail="Chat not found",
         )
 
+
     # -----------------------------------------------------
     # VALIDATE FILE
     # -----------------------------------------------------
@@ -386,6 +409,7 @@ async def upload_document(
             detail="No file selected",
         )
 
+
     # -----------------------------------------------------
     # GET CHAT COLLECTION
     # -----------------------------------------------------
@@ -394,40 +418,91 @@ async def upload_document(
         chat_id
     )
 
+
     # -----------------------------------------------------
-    # SAVE FILE TEMPORARILY
+    # CREATE PERMANENT CHAT UPLOAD DIRECTORY
     # -----------------------------------------------------
 
-    temp_path = None
+    upload_directory = os.path.join(
+        "data",
+        "uploads",
+        chat_id,
+    )
+
+    os.makedirs(
+        upload_directory,
+        exist_ok=True,
+    )
+
+
+    # -----------------------------------------------------
+    # SAFE ORIGINAL FILE NAME
+    # -----------------------------------------------------
+
+    original_file_name = os.path.basename(
+        file.filename
+    )
+
+
+    # -----------------------------------------------------
+    # GET FILE EXTENSION
+    # -----------------------------------------------------
+
+    extension = os.path.splitext(
+        original_file_name
+    )[1]
+
+
+    # -----------------------------------------------------
+    # CREATE UNIQUE STORAGE NAME
+    # -----------------------------------------------------
+
+    storage_name = (
+        f"{uuid.uuid4().hex}"
+        f"{extension}"
+    )
+
+
+    permanent_path = os.path.join(
+        upload_directory,
+        storage_name,
+    )
+
+
+    # -----------------------------------------------------
+    # SAVE UPLOADED FILE PERMANENTLY
+    # -----------------------------------------------------
 
     try:
 
-        suffix = os.path.splitext(
-            file.filename
-        )[1]
+        content = await file.read()
 
-        with tempfile.NamedTemporaryFile(
-            delete=False,
-            suffix=suffix,
-        ) as temp_file:
 
-            temp_path = temp_file.name
+        with open(
+            permanent_path,
+            "wb",
+        ) as output_file:
 
-            content = await file.read()
-
-            temp_file.write(
+            output_file.write(
                 content
             )
+
+
+        file_size = len(
+            content
+        )
+
 
         # -------------------------------------------------
         # PROCESS DOCUMENT
         # -------------------------------------------------
 
         chunks = process_document(
-            file_path=temp_path,
-            file_name=file.filename,
+            file_path=permanent_path,
+            file_name=original_file_name,
             collection=collection,
         )
+
 
         # -------------------------------------------------
         # CHECK PROCESSING RESULT
@@ -443,6 +518,23 @@ async def upload_document(
                 ),
             )
 
+
+        # -------------------------------------------------
+        # SAVE FILE METADATA
+        # -------------------------------------------------
+
+        file_key = uuid.uuid4().hex
+
+
+        add_file(
+            chat_id=chat_id,
+            file_key=file_key,
+            file_name=original_file_name,
+            file_path=permanent_path,
+            file_size=file_size,
+        )
+
+
         # -------------------------------------------------
         # SUCCESS
         # -------------------------------------------------
@@ -450,7 +542,10 @@ async def upload_document(
         return {
             "success": True,
             "chat_id": chat_id,
-            "file_name": file.filename,
+            "file_key": file_key,
+            "file_name": original_file_name,
+            "file_path": permanent_path,
+            "file_size": file_size,
             "chunks": len(chunks),
             "message": (
                 "Document uploaded and processed "
@@ -458,18 +553,77 @@ async def upload_document(
             ),
         }
 
+
+    # -----------------------------------------------------
+    # HTTP ERROR
+    # -----------------------------------------------------
+
     except HTTPException:
+
+        if os.path.exists(
+            permanent_path
+        ):
+
+            try:
+
+                os.remove(
+                    permanent_path
+                )
+
+            except Exception:
+
+                pass
 
         raise
 
+
+    # -----------------------------------------------------
+    # VALUE ERROR
+    # -----------------------------------------------------
+
     except ValueError as e:
+
+        if os.path.exists(
+            permanent_path
+        ):
+
+            try:
+
+                os.remove(
+                    permanent_path
+                )
+
+            except Exception:
+
+                pass
+
 
         raise HTTPException(
             status_code=400,
             detail=str(e),
         )
 
+
+    # -----------------------------------------------------
+    # GENERAL ERROR
+    # -----------------------------------------------------
+
     except Exception as e:
+
+        if os.path.exists(
+            permanent_path
+        ):
+
+            try:
+
+                os.remove(
+                    permanent_path
+                )
+
+            except Exception:
+
+                pass
+
 
         raise HTTPException(
             status_code=500,
@@ -477,27 +631,6 @@ async def upload_document(
                 f"Document processing failed: {str(e)}"
             ),
         )
-
-    finally:
-
-        # -------------------------------------------------
-        # DELETE TEMPORARY FILE
-        # -------------------------------------------------
-
-        if (
-            temp_path
-            and os.path.exists(temp_path)
-        ):
-
-            try:
-
-                os.remove(
-                    temp_path
-                )
-
-            except Exception:
-
-                pass
 
 
 # =========================================================
@@ -525,6 +658,7 @@ def ask_documents(
             detail="Chat not found",
         )
 
+
     # -----------------------------------------------------
     # VALIDATE QUESTION
     # -----------------------------------------------------
@@ -538,6 +672,7 @@ def ask_documents(
             detail="Question cannot be empty",
         )
 
+
     # -----------------------------------------------------
     # GET CHAT-SPECIFIC CHROMA COLLECTION
     # -----------------------------------------------------
@@ -545,6 +680,7 @@ def ask_documents(
     collection = get_chat_collection(
         chat_id
     )
+
 
     # -----------------------------------------------------
     # CHECK WHETHER DOCUMENTS EXIST
@@ -562,6 +698,7 @@ def ask_documents(
             ),
         )
 
+
     # -----------------------------------------------------
     # SAVE USER QUESTION
     # -----------------------------------------------------
@@ -571,10 +708,12 @@ def ask_documents(
         "content": question,
     }
 
+
     save_message(
         chat_id,
         user_message,
     )
+
 
     # -----------------------------------------------------
     # RETRIEVE RELEVANT CHUNKS
@@ -597,15 +736,18 @@ def ask_documents(
             ),
         )
 
+
     documents = retrieval_result.get(
         "documents",
         [],
     )
 
+
     metadatas = retrieval_result.get(
         "metadatas",
         [],
     )
+
 
     # -----------------------------------------------------
     # CHECK RETRIEVAL RESULT
@@ -618,16 +760,19 @@ def ask_documents(
             "in the uploaded documents."
         )
 
+
         assistant_message = {
             "role": "assistant",
             "content": answer,
             "sources": [],
         }
 
+
         save_message(
             chat_id,
             assistant_message,
         )
+
 
         return {
             "success": True,
@@ -637,11 +782,13 @@ def ask_documents(
             "sources": [],
         }
 
+
     # -----------------------------------------------------
     # BUILD RETRIEVED CONTEXT
     # -----------------------------------------------------
 
     context_parts = []
+
 
     for i, document in enumerate(
         documents,
@@ -654,10 +801,12 @@ def ask_documents(
             else {}
         )
 
+
         file_name = metadata.get(
             "file_name",
             "Unknown file",
         )
+
 
         page = metadata.get(
             "page",
@@ -666,6 +815,7 @@ def ask_documents(
                 "Unknown",
             ),
         )
+
 
         context_parts.append(
             f"""
@@ -680,9 +830,11 @@ Content:
 """
         )
 
+
     retrieved_context = "\n".join(
         context_parts
     )
+
 
     # -----------------------------------------------------
     # BUILD CONVERSATION CONTEXT
@@ -692,7 +844,9 @@ Content:
         chat_id
     )
 
+
     conversation_parts = []
+
 
     for message in previous_messages:
 
@@ -701,12 +855,18 @@ Content:
             "",
         )
 
+
         content = message.get(
             "content",
             "",
         )
 
-        # Don't include current question twice
+
+        # -------------------------------------------------
+        # IMPORTANT:
+        # Don't include current question twice.
+        # -------------------------------------------------
+
         if (
             role == "user"
             and content == question
@@ -714,11 +874,13 @@ Content:
 
             continue
 
+
         if role == "user":
 
             conversation_parts.append(
                 f"User: {content}"
             )
+
 
         elif role == "assistant":
 
@@ -726,9 +888,11 @@ Content:
                 f"Assistant: {content}"
             )
 
+
     conversation_context = "\n".join(
         conversation_parts
     )
+
 
     # -----------------------------------------------------
     # FINAL RAG CONTEXT
@@ -744,6 +908,7 @@ RETRIEVED DOCUMENT CONTEXT:
 
 {retrieved_context}
 """
+
 
     # -----------------------------------------------------
     # GENERATE ANSWER
@@ -765,11 +930,13 @@ RETRIEVED DOCUMENT CONTEXT:
             ),
         )
 
+
     # -----------------------------------------------------
     # BUILD SOURCES
     # -----------------------------------------------------
 
     grouped_sources = {}
+
 
     for metadata in metadatas:
 
@@ -780,15 +947,18 @@ RETRIEVED DOCUMENT CONTEXT:
 
             continue
 
+
         file_name = metadata.get(
             "file_name",
             "Unknown file",
         )
 
+
         source_type = metadata.get(
             "source_type",
             "document",
         )
+
 
         page = metadata.get(
             "page",
@@ -796,6 +966,7 @@ RETRIEVED DOCUMENT CONTEXT:
                 "page_number"
             ),
         )
+
 
         if file_name not in grouped_sources:
 
@@ -809,6 +980,7 @@ RETRIEVED DOCUMENT CONTEXT:
                 ),
             }
 
+
         if page is not None:
 
             grouped_sources[
@@ -816,6 +988,7 @@ RETRIEVED DOCUMENT CONTEXT:
             ]["pages"].add(
                 str(page)
             )
+
 
         # -------------------------------------------------
         # YOUTUBE SUPPORT
@@ -826,6 +999,7 @@ RETRIEVED DOCUMENT CONTEXT:
             start_time = metadata.get(
                 "start_time"
             )
+
 
             if start_time is not None:
 
@@ -844,6 +1018,7 @@ RETRIEVED DOCUMENT CONTEXT:
 
                     pass
 
+
             if metadata.get(
                 "video_id"
             ):
@@ -854,11 +1029,13 @@ RETRIEVED DOCUMENT CONTEXT:
                     "video_id"
                 ]
 
+
     # -----------------------------------------------------
     # CONVERT SOURCES TO JSON-SAFE FORMAT
     # -----------------------------------------------------
 
     sources = []
+
 
     for file_name, source in (
         grouped_sources.items()
@@ -873,6 +1050,7 @@ RETRIEVED DOCUMENT CONTEXT:
                 source["pages"]
             ),
         }
+
 
         # -------------------------------------------------
         # YOUTUBE METADATA
@@ -889,15 +1067,18 @@ RETRIEVED DOCUMENT CONTEXT:
                 "video_id"
             )
 
+
             formatted_source[
                 "timestamps"
             ] = sorted(
                 source["timestamps"]
             )
 
+
         sources.append(
             formatted_source
         )
+
 
     # -----------------------------------------------------
     # SAVE ASSISTANT MESSAGE
@@ -909,10 +1090,12 @@ RETRIEVED DOCUMENT CONTEXT:
         "sources": sources,
     }
 
+
     save_message(
         chat_id,
         assistant_message,
     )
+
 
     # -----------------------------------------------------
     # API RESPONSE
@@ -924,4 +1107,275 @@ RETRIEVED DOCUMENT CONTEXT:
         "question": question,
         "answer": answer,
         "sources": sources,
+    }
+
+# =========================================================
+# YOUTUBE LEVEL 2 — MULTIMODAL ASK
+# =========================================================
+
+@app.post("/api/chats/{chat_id}/youtube/ask")
+def ask_youtube_multimodal(
+    chat_id: str,
+    request: YouTubeAskRequest,
+):
+
+    # -----------------------------------------------------
+    # CHECK CHAT
+    # -----------------------------------------------------
+
+    chat = get_chat(
+        chat_id
+    )
+
+    if not chat:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Chat not found",
+        )
+
+
+    # -----------------------------------------------------
+    # VALIDATE VIDEO URL
+    # -----------------------------------------------------
+
+    video_url = request.video_url.strip()
+
+    if not video_url:
+
+        raise HTTPException(
+            status_code=400,
+            detail="YouTube video URL is required",
+        )
+
+
+    # -----------------------------------------------------
+    # VALIDATE QUESTION
+    # -----------------------------------------------------
+
+    question = request.question.strip()
+
+    if not question:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Question cannot be empty",
+        )
+
+
+    # -----------------------------------------------------
+    # GET CHAT COLLECTION
+    # -----------------------------------------------------
+
+    collection = get_chat_collection(
+        chat_id
+    )
+
+
+    # -----------------------------------------------------
+    # RETRIEVE TRANSCRIPT CONTEXT
+    #
+    # If transcript chunks have already been indexed
+    # for this chat, use them as supporting context.
+    # -----------------------------------------------------
+
+    context = ""
+
+    try:
+
+        retrieval_result = retrieve_chunks(
+            question,
+            collection,
+            top_k=5,
+        )
+
+        documents = retrieval_result.get(
+            "documents",
+            [],
+        )
+
+        metadatas = retrieval_result.get(
+            "metadatas",
+            [],
+        )
+
+
+        context_parts = []
+
+
+        for i, document in enumerate(
+            documents,
+            start=1,
+        ):
+
+            metadata = (
+                metadatas[i - 1]
+                if i - 1 < len(metadatas)
+                else {}
+            )
+
+
+            if not isinstance(
+                metadata,
+                dict,
+            ):
+
+                metadata = {}
+
+
+            file_name = metadata.get(
+                "file_name",
+                "YouTube transcript",
+            )
+
+
+            start_time = metadata.get(
+                "start_time"
+            )
+
+
+            timestamp_text = ""
+
+
+            if start_time is not None:
+
+                try:
+
+                    seconds = int(
+                        float(start_time)
+                    )
+
+                    minutes = seconds // 60
+
+                    remaining_seconds = (
+                        seconds % 60
+                    )
+
+                    timestamp_text = (
+                        f"{minutes}:"
+                        f"{remaining_seconds:02d}"
+                    )
+
+                except (
+                    TypeError,
+                    ValueError,
+                ):
+
+                    timestamp_text = str(
+                        start_time
+                    )
+
+
+            context_parts.append(
+                f"""
+SOURCE {i}
+
+File:
+{file_name}
+
+Timestamp:
+{timestamp_text}
+
+Transcript:
+{document}
+"""
+            )
+
+
+        context = "\n".join(
+            context_parts
+        )
+
+
+    except Exception as e:
+
+        # -------------------------------------------------
+        # Transcript retrieval should not prevent native
+        # multimodal video analysis.
+        # -------------------------------------------------
+
+        print(
+            "⚠️ YouTube transcript retrieval failed:",
+            e,
+        )
+
+        context = ""
+
+
+    # -----------------------------------------------------
+    # SAVE USER QUESTION
+    # -----------------------------------------------------
+
+    user_message = {
+        "role": "user",
+        "content": question,
+        "video_url": video_url,
+    }
+
+
+    save_message(
+        chat_id,
+        user_message,
+    )
+
+
+    # -----------------------------------------------------
+    # GEMINI MULTIMODAL ANALYSIS
+    # -----------------------------------------------------
+
+    try:
+
+        answer = generate_youtube_multimodal_response(
+            video_url=video_url,
+            context=context,
+            question=question,
+        )
+
+
+    except Exception as e:
+
+        print(
+            "❌ YouTube multimodal analysis failed:",
+            e,
+        )
+
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"YouTube multimodal analysis failed: "
+                f"{str(e)}"
+            ),
+        )
+
+
+    # -----------------------------------------------------
+    # SAVE ASSISTANT RESPONSE
+    # -----------------------------------------------------
+
+    assistant_message = {
+        "role": "assistant",
+        "content": answer,
+        "video_url": video_url,
+        "source_type": "youtube",
+    }
+
+
+    save_message(
+        chat_id,
+        assistant_message,
+    )
+
+
+    # -----------------------------------------------------
+    # RESPONSE
+    # -----------------------------------------------------
+
+    return {
+        "success": True,
+        "chat_id": chat_id,
+        "video_url": video_url,
+        "question": question,
+        "answer": answer,
+        "source_type": "youtube",
     }

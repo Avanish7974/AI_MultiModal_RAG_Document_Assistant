@@ -358,3 +358,62 @@ async function uploadDocument(
         throw error;
     }
 }
+// =========================================================
+// YOUTUBE LEVEL 2 — MULTIMODAL ASK
+// =========================================================
+
+async function askYouTubeMultimodal(
+    chatId,
+    videoUrl,
+    question
+) {
+
+    // -----------------------------------------------------
+    // VALIDATE CHAT
+    // -----------------------------------------------------
+
+    if (!chatId) {
+        throw new Error(
+            "Chat ID is required."
+        );
+    }
+
+
+    // -----------------------------------------------------
+    // VALIDATE VIDEO URL
+    // -----------------------------------------------------
+
+    if (!videoUrl || !videoUrl.trim()) {
+        throw new Error(
+            "YouTube video URL is required."
+        );
+    }
+
+
+    // -----------------------------------------------------
+    // VALIDATE QUESTION
+    // -----------------------------------------------------
+
+    if (!question || !question.trim()) {
+        throw new Error(
+            "Question cannot be empty."
+        );
+    }
+
+
+    // -----------------------------------------------------
+    // CALL BACKEND
+    // -----------------------------------------------------
+
+    return await apiRequest(
+        `/api/chats/${encodeURIComponent(chatId)}/youtube/ask`,
+        {
+            method: "POST",
+
+            body: JSON.stringify({
+                video_url: videoUrl.trim(),
+                question: question.trim()
+            })
+        }
+    );
+}
