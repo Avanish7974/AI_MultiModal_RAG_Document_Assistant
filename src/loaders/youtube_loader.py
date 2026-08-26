@@ -256,6 +256,10 @@ def _download_youtube_audio(
         "youtube_audio.%(ext)s"
     )
 
+    # -----------------------------------------------------
+    # FIRST ATTEMPT — NORMAL yt-dlp
+    # -----------------------------------------------------
+
     ydl_options = {
         "format": "bestaudio/best",
         "outtmpl": output_template,
@@ -274,11 +278,60 @@ def _download_youtube_audio(
                 [youtube_url]
             )
 
-    except Exception as error:
+    except Exception as first_error:
 
-        raise RuntimeError(
-            f"Could not download YouTube audio: {error}"
-        ) from error
+        # -------------------------------------------------
+        # SECOND ATTEMPT — USE THE USER'S CHROME SESSION
+        #
+        # YouTube can reject yt-dlp with:
+        # "Sign in to confirm you're not a bot."
+        #
+        # yt-dlp officially supports browser cookies for
+        # this situation. The browser session must be
+        # available on the same machine.
+        # -------------------------------------------------
+
+        print(
+            "Normal YouTube audio download failed."
+        )
+
+        print(
+            f"Reason: {first_error}"
+        )
+
+        chrome_options = {
+            "format": "bestaudio/best",
+            "outtmpl": output_template,
+            "noplaylist": True,
+            "quiet": True,
+            "no_warnings": True,
+            "cookiesfrombrowser": ("chrome",),
+        }
+
+        try:
+
+            print(
+                "Retrying YouTube audio download "
+                "using Chrome browser cookies..."
+            )
+
+            with yt_dlp.YoutubeDL(
+                chrome_options
+            ) as ydl:
+
+                ydl.download(
+                    [youtube_url]
+                )
+
+        except Exception as second_error:
+
+            raise RuntimeError(
+                "Could not download YouTube audio.\n\n"
+                "Normal yt-dlp download failed:\n"
+                f"{first_error}\n\n"
+                "Chrome-cookie retry also failed:\n"
+                f"{second_error}"
+            ) from second_error
 
     # -----------------------------------------------------
     # FIND DOWNLOADED AUDIO

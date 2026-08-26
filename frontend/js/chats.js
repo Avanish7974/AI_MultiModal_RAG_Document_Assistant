@@ -5,6 +5,10 @@
 let currentChatId = null;
 let selectedChatForMenu = null;
 
+// Recent chats sidebar state.
+const MAX_VISIBLE_RECENT_CHATS = 6;
+let recentChatsExpanded = false;
+
 
 // =========================================================
 // INTERNAL FLAGS
@@ -141,6 +145,117 @@ function getChatTitleFromObject(chat) {
 // =========================================================
 // RENDER CHAT LIST
 // =========================================================
+
+function updateRecentChatsSidebar(chatCount) {
+    const container = document.getElementById("recentChats");
+    if (!container) return;
+    const section = container.closest(".recent-section");
+    if (!section) return;
+    const header = section.querySelector(".sidebar-section-header");
+    if (!header) return;
+
+    let button = header.querySelector(".recent-view-all-btn");
+
+    if (chatCount <= MAX_VISIBLE_RECENT_CHATS) {
+        recentChatsExpanded = false;
+
+        // The CSS uses .recent-expanded to decide whether
+        // chats 7+ should be visible. Always clear that class
+        // when the list has 6 or fewer chats.
+        section.classList.remove(
+            "recent-expanded"
+        );
+
+        if (button) button.remove();
+    } else {
+        if (!button) {
+            button = document.createElement("button");
+            button.type = "button";
+            button.className = "recent-view-all-btn";
+            button.addEventListener("click", () => {
+                recentChatsExpanded = !recentChatsExpanded;
+                applyRecentChatsVisibility();
+            });
+            header.appendChild(button);
+        }
+        button.textContent = recentChatsExpanded ? "Show less" : "View all";
+    }
+    applyRecentChatsVisibility();
+}
+
+function applyRecentChatsVisibility() {
+
+    const container =
+        document.getElementById(
+            "recentChats"
+        );
+
+    if (!container) {
+        return;
+    }
+
+    // =====================================================
+    // SYNC THE STATE WITH THE CSS
+    // =====================================================
+    // The stylesheet intentionally hides chats 7+ while
+    // .recent-section does NOT have .recent-expanded.
+    // Add/remove that class here so JavaScript and CSS use
+    // the same source of truth.
+
+    const section =
+        container.closest(
+            ".recent-section"
+        );
+
+    if (section) {
+        section.classList.toggle(
+            "recent-expanded",
+            recentChatsExpanded
+        );
+    }
+
+    // =====================================================
+    // UPDATE CHAT ROW VISIBILITY
+    // =====================================================
+
+    const rows =
+        Array.from(
+            container.querySelectorAll(
+                ".chat-row"
+            )
+        );
+
+    rows.forEach(
+        (row, index) => {
+
+            row.style.display =
+                (
+                    recentChatsExpanded ||
+                    index <
+                        MAX_VISIBLE_RECENT_CHATS
+                )
+                    ? "flex"
+                    : "none";
+
+        }
+    );
+
+    // =====================================================
+    // UPDATE BUTTON TEXT
+    // =====================================================
+
+    const button =
+        document.querySelector(
+            ".recent-section .recent-view-all-btn"
+        );
+
+    if (button) {
+        button.textContent =
+            recentChatsExpanded
+                ? "Show less"
+                : "View all";
+    }
+}
 
 function renderChats(chats) {
 
@@ -353,6 +468,8 @@ chatButton.appendChild(
         );
 
     });
+
+    updateRecentChatsSidebar(chats.length);
 }
 
 
@@ -477,6 +594,9 @@ async function selectChat(chatId) {
         return;
     }
 
+
+    recentChatsExpanded = false;
+    applyRecentChatsVisibility();
 
     try {
 
@@ -1568,169 +1688,12 @@ function initializeChatControls() {
     }
 }
 
-// =========================================================
-// STEP 6 — SIDEBAR CONTROLS
-// ChatGPT-style desktop collapse + mobile drawer.
-// =========================================================
-
-let sidebarControlsInitialized = false;
-
-function initializeSidebarControls() {
-
-    if (sidebarControlsInitialized) {
-        return;
-    }
-
-    sidebarControlsInitialized = true;
-
-    const sidebar =
-        document.getElementById("sidebar");
-
-    const toggle =
-        document.getElementById("sidebarToggle");
-
-    if (!sidebar || !toggle) {
-        console.warn("Sidebar controls: required elements not found.");
-        return;
-    }
-
-    const mobileBreakpoint = 760;
-
-    function isMobile() {
-        return window.innerWidth <= mobileBreakpoint;
-    }
-
-    function updateToggleIcon() {
-
-        if (isMobile()) {
-
-            toggle.textContent =
-                sidebar.classList.contains("is-mobile-open")
-                    ? "‹"
-                    : "›";
-
-            toggle.title =
-                sidebar.classList.contains("is-mobile-open")
-                    ? "Close sidebar"
-                    : "Open sidebar";
-
-            return;
-        }
-
-        toggle.textContent =
-            sidebar.classList.contains("is-collapsed")
-                ? "›"
-                : "‹";
-
-        toggle.title =
-            sidebar.classList.contains("is-collapsed")
-                ? "Expand sidebar"
-                : "Collapse sidebar";
-    }
-
-    function closeMobileSidebar() {
-
-        if (!isMobile()) {
-            return;
-        }
-
-        sidebar.classList.remove("is-mobile-open");
-
-        document.body.classList.remove(
-            "sidebar-mobile-open"
-        );
-
-        updateToggleIcon();
-    }
-
-    toggle.addEventListener("click", event => {
-
-        event.preventDefault();
-        event.stopPropagation();
-
-        if (isMobile()) {
-
-            const isOpen =
-                sidebar.classList.toggle(
-                    "is-mobile-open"
-                );
-
-            document.body.classList.toggle(
-                "sidebar-mobile-open",
-                isOpen
-            );
-
-        } else {
-
-            sidebar.classList.toggle(
-                "is-collapsed"
-            );
-        }
-
-        updateToggleIcon();
-    });
-
-    // Clicking outside closes mobile sidebar.
-    document.addEventListener("click", event => {
-
-        if (!isMobile()) {
-            return;
-        }
-
-        if (
-            !document.body.classList.contains(
-                "sidebar-mobile-open"
-            )
-        ) {
-            return;
-        }
-
-        if (sidebar.contains(event.target)) {
-            return;
-        }
-
-        closeMobileSidebar();
-    });
-
-    // Escape closes mobile sidebar.
-    document.addEventListener("keydown", event => {
-
-        if (
-            event.key === "Escape" &&
-            isMobile()
-        ) {
-            closeMobileSidebar();
-        }
-    });
-
-    // Reset mobile state when switching back to desktop.
-    window.addEventListener("resize", () => {
-
-        if (!isMobile()) {
-
-            sidebar.classList.remove(
-                "is-mobile-open"
-            );
-
-            document.body.classList.remove(
-                "sidebar-mobile-open"
-            );
-        }
-
-        updateToggleIcon();
-    });
-
-    updateToggleIcon();
-}
-
 
 // =========================================================
 // INITIALIZE WHEN DOM IS READY
 // =========================================================
 
 function initializeChatsModule() {
-
-    initializeSidebarControls();
 
     initializeChatControls();
 

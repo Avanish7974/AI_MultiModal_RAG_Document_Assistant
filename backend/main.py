@@ -19,11 +19,19 @@ from src.services.chat_manager import (
     add_file,
 )
 
-from src.vectorstore.chroma_store import get_chat_collection
+from src.vectorstore.chroma_store import (
+    get_chat_collection,
+    add_youtube_transcript,
+)
 from src.retriever.retriever import retrieve_chunks
+from src.loaders.youtube_loader import (
+    extract_youtube_transcript,
+    extract_video_id,
+)
 from src.llm.gemini import (
     generate_response,
     generate_youtube_multimodal_response,
+    should_use_youtube_multimodal,
 )
 
 from src.services.summary_service import generate_summary
@@ -86,6 +94,11 @@ class ChatUpdateRequest(BaseModel):
 class YouTubeAskRequest(BaseModel):
     video_url: str
     question: str
+
+
+class YouTubeAnalyzeRequest(BaseModel):
+    video_url: str
+
 
 class SummaryRequest(BaseModel):
     length: str = "Medium"
@@ -1173,8 +1186,8 @@ def ask_documents(
         raise HTTPException(
             status_code=400,
             detail=(
-                "No documents found in this chat. "
-                "Please upload a document first."
+                "No source found in this chat. "
+                "Please upload a document or analyze a YouTube video first."
             ),
         )
 
@@ -1590,6 +1603,82 @@ RETRIEVED DOCUMENT CONTEXT:
     }
 
 
+
+# =========================================================
+# YOUTUBE MODE SOURCE STATUS
+# =========================================================
+
+def _get_active_youtube_status(chat_id: str):
+    """Return the analyzed YouTube source for a chat, if one exists."""
+    video_url = None
+    video_id = None
+    analyzed = False
+
+    # First use persisted chat messages. The analyze endpoint stores
+    # video_url/video_id/youtube_summary on the assistant summary message.
+    try:
+        messages = get_messages(chat_id) or []
+        for message in reversed(messages):
+            if not isinstance(message, dict):
+                continue
+            candidate_url = message.get("video_url")
+            if candidate_url:
+                video_url = str(candidate_url).strip()
+                video_id = message.get("video_id") or extract_video_id(video_url)
+                analyzed = bool(message.get("youtube_summary"))
+                if analyzed:
+                    return {
+                        "analyzed": True,
+                        "video_url": video_url,
+                        "video_id": video_id,
+                    }
+    except Exception:
+        pass
+
+    # Fallback to Chroma metadata so the mode still works even if an older
+    # chat message did not persist the extra YouTube fields.
+    try:
+        collection = get_chat_collection(chat_id)
+        result = collection.get(include=["metadatas"])
+        for metadata in reversed(result.get("metadatas") or []):
+            if not isinstance(metadata, dict):
+                continue
+            if metadata.get("source_type") != "youtube":
+                continue
+
+            video_id = metadata.get("video_id")
+            if video_id:
+                video_url = (
+                    metadata.get("video_url")
+                    or f"https://www.youtube.com/watch?v={video_id}"
+                )
+                return {
+                    "analyzed": True,
+                    "video_url": str(video_url).strip(),
+                    "video_id": video_id,
+                }
+    except Exception:
+        pass
+
+    return {
+        "analyzed": False,
+        "video_url": None,
+        "video_id": None,
+    }
+
+
+@app.get("/api/chats/{chat_id}/youtube/status")
+def youtube_status(chat_id: str):
+    chat = get_chat(chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    return {
+        "success": True,
+        "chat_id": chat_id,
+        **_get_active_youtube_status(chat_id),
+    }
+
 # =========================================================
 # SUMMARIZE DOCUMENTS
 # =========================================================
@@ -1613,12 +1702,14 @@ def summarize_documents(
         )
     )
 
-    if not documents:
+    youtube = _get_active_youtube_status(chat_id)
+
+    if not documents and not youtube.get("analyzed"):
         raise HTTPException(
             status_code=400,
             detail=(
-                "No documents found in this chat. "
-                "Please upload a document first."
+                "No source found in this chat. "
+                "Please upload a document or analyze a YouTube video first."
             ),
         )
 
@@ -1633,8 +1724,7 @@ def summarize_documents(
         raise HTTPException(
             status_code=400,
             detail=(
-                "Could not extract readable content "
-                "from the uploaded documents."
+                "Could not extract readable content from the available source."
             ),
         )
 
@@ -1651,18 +1741,18 @@ def summarize_documents(
         length = "Medium"
 
     question = f"""
-Summarize ALL uploaded documents together.
+Summarize ALL available source content in this chat.
 
 Summary length: {length}
 
 Requirements:
-- Cover the important information from all uploaded documents.
+- If the source is a YouTube transcript, summarize the video itself, not the existence of the transcript.
+- Cover the important information and main ideas.
 - Organize the answer with clear headings and bullet points where useful.
-- Do not focus on only one document.
+- Do not focus only on the beginning of the source.
 - Do not invent information.
-- Only use information supported by the supplied document context.
-- If the documents contain different or conflicting information,
-  clearly identify the difference.
+- Only use information supported by the supplied source context.
+- If multiple sources are present, clearly distinguish important differences.
 """
 
     try:
@@ -1881,7 +1971,7 @@ def generate_document_quiz(
     try:
         retrieval_result = retrieve_chunks(
             "Generate a quiz covering the important concepts "
-            "from all uploaded documents",
+            "from all indexed sources in this chat",
             collection,
             top_k=10,
         )
@@ -1914,8 +2004,7 @@ def generate_document_quiz(
         raise HTTPException(
             status_code=400,
             detail=(
-                "Could not retrieve document content "
-                "for quiz generation."
+                "Could not retrieve source content for quiz generation."
             ),
         )
 
@@ -2023,6 +2112,10 @@ Content:
         ),
         "sources": sources,
         "mode": "quiz",
+        # Persist the complete quiz so refresh/chat switching can
+        # reconstruct the interactive quiz in the frontend.
+        "quiz": quiz_data,
+        "difficulty": difficulty,
     }
 
     save_message(
@@ -2103,8 +2196,7 @@ def generate_document_flashcards(
         raise HTTPException(
             status_code=400,
             detail=(
-                "Could not extract readable document "
-                "content for flashcards."
+                "Could not extract readable source content for flashcards."
             ),
         )
 
@@ -2135,7 +2227,7 @@ Rules:
 - Back should provide the answer or explanation.
 - Keep cards concise and useful for revision.
 - Cover different important concepts instead of repeating the same fact.
-- Every card must be supported by the supplied documents.
+- Every card must be supported by the supplied source context.
 - Do not invent information.
 - Include the source file and page when available.
 
@@ -2201,6 +2293,10 @@ Document context:
         ),
         "sources": sources,
         "mode": "flashcards",
+        # Persist the complete flashcard set so refresh/chat switching can
+        # reconstruct the interactive cards in the frontend.
+        "flashcards": flashcard_data,
+        "difficulty": difficulty,
     }
 
     save_message(
@@ -2219,7 +2315,177 @@ Document context:
 
 
 # =========================================================
-# YOUTUBE LEVEL 2 — MULTIMODAL ASK
+# YOUTUBE — TRANSCRIPT INGESTION + INITIAL SUMMARY
+# =========================================================
+
+@app.post("/api/chats/{chat_id}/youtube/analyze")
+def analyze_youtube_video(
+    chat_id: str,
+    request: YouTubeAnalyzeRequest,
+):
+    """
+    Fast/free-tier friendly YouTube initialization.
+
+    1. Extract the transcript.
+    2. Store transcript segments in the chat's Chroma collection.
+    3. Generate ONE text-only summary from the transcript.
+    4. Persist that summary in chat history as the video's context.
+
+    No full-video multimodal Gemini request is made here.
+    This keeps the initial YouTube setup much faster and cheaper.
+    """
+
+    chat = get_chat(chat_id)
+    if not chat:
+        raise HTTPException(
+            status_code=404,
+            detail="Chat not found",
+        )
+
+    video_url = request.video_url.strip()
+    if not video_url:
+        raise HTTPException(
+            status_code=400,
+            detail="YouTube video URL is required",
+        )
+
+    try:
+        video_id = extract_video_id(video_url)
+        if not video_id:
+            raise ValueError("Invalid YouTube URL")
+
+        transcript_segments = extract_youtube_transcript(video_url)
+        if not transcript_segments:
+            raise ValueError("No transcript could be extracted from this video")
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"YouTube transcript extraction failed: {str(e)}",
+        )
+
+    collection = get_chat_collection(chat_id)
+    video_name = f"YouTube Video - {video_id}"
+
+    # add_youtube_transcript already performs a duplicate check.
+    try:
+        add_youtube_transcript(
+            collection=collection,
+            transcript_segments=transcript_segments,
+            video_id=video_id,
+            video_name=video_name,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"YouTube transcript indexing failed: {str(e)}",
+        )
+
+    # Read back only this video's transcript so the initial summary is
+    # grounded in the same ChromaDB source used for later questions.
+    try:
+        indexed = collection.get(
+            where={"video_id": video_id},
+            include=["documents", "metadatas"],
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"YouTube transcript retrieval failed: {str(e)}",
+        )
+
+    documents = indexed.get("documents") or []
+    metadatas = indexed.get("metadatas") or []
+
+    if not documents:
+        raise HTTPException(
+            status_code=500,
+            detail="YouTube transcript was not available after indexing.",
+        )
+
+    # Preserve chronological order for a coherent summary.
+    items = []
+    for index, document in enumerate(documents):
+        metadata = metadatas[index] if index < len(metadatas) else {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        try:
+            start_time = float(metadata.get("start_time", 0))
+        except (TypeError, ValueError):
+            start_time = 0.0
+        items.append((start_time, str(document).strip()))
+
+    items.sort(key=lambda item: item[0])
+
+    transcript_parts = []
+    for start_time, document in items:
+        if not document:
+            continue
+        minutes = int(start_time // 60)
+        seconds = int(start_time % 60)
+        transcript_parts.append(
+            f"[{minutes:02d}:{seconds:02d}] {document}"
+        )
+
+    transcript_context = "\n".join(transcript_parts)
+
+    summary_prompt = f"""
+You are summarizing a YouTube video for a RAG assistant.
+
+Create a clear, useful summary using ONLY the supplied transcript.
+Do not use outside knowledge and do not invent details.
+
+Include:
+- A short overview of what the video is about.
+- The main topics/concepts in logical order.
+- Important explanations, examples, or conclusions.
+- A concise list of key takeaways.
+- Important timestamps when they are present in the transcript.
+
+Keep the summary reasonably concise so the user can read it in chat,
+but cover the important content rather than summarizing only the beginning.
+
+VIDEO TRANSCRIPT
+=========================================================
+{transcript_context}
+=========================================================
+"""
+
+    try:
+        summary = generate_response(
+            context=transcript_context,
+            question=summary_prompt,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"YouTube summary generation failed: {str(e)}",
+        )
+
+    assistant_message = {
+        "role": "assistant",
+        "content": summary,
+        "video_url": video_url,
+        "source_type": "youtube",
+        "youtube_summary": True,
+        "video_id": video_id,
+    }
+
+    save_message(chat_id, assistant_message)
+
+    return {
+        "success": True,
+        "chat_id": chat_id,
+        "video_url": video_url,
+        "video_id": video_id,
+        "answer": summary,
+        "summary": summary,
+        "source_type": "youtube",
+        "transcript_segments": len(transcript_parts),
+    }
+
+
+# =========================================================
+# YOUTUBE LEVEL 2 — MULTIMODAL / TRANSCRIPT ASK
 # =========================================================
 
 @app.post("/api/chats/{chat_id}/youtube/ask")
@@ -2227,258 +2493,149 @@ def ask_youtube_multimodal(
     chat_id: str,
     request: YouTubeAskRequest,
 ):
+    """
+    Answer a question about an already indexed YouTube video.
 
-    # -----------------------------------------------------
-    # CHECK CHAT
-    # -----------------------------------------------------
+    Normal questions use transcript RAG (fast/free-tier friendly).
+    Questions that clearly require a visual/timestamp check use the
+    existing multimodal Gemini function on a targeted video window.
+    """
 
-    chat = get_chat(
-        chat_id
-    )
-
+    chat = get_chat(chat_id)
     if not chat:
-
-        raise HTTPException(
-            status_code=404,
-            detail="Chat not found",
-        )
-
-
-    # -----------------------------------------------------
-    # VALIDATE VIDEO URL
-    # -----------------------------------------------------
+        raise HTTPException(status_code=404, detail="Chat not found")
 
     video_url = request.video_url.strip()
-
-    if not video_url:
-
-        raise HTTPException(
-            status_code=400,
-            detail="YouTube video URL is required",
-        )
-
-
-    # -----------------------------------------------------
-    # VALIDATE QUESTION
-    # -----------------------------------------------------
-
     question = request.question.strip()
 
+    if not video_url:
+        raise HTTPException(status_code=400, detail="YouTube video URL is required")
     if not question:
+        raise HTTPException(status_code=400, detail="Question cannot be empty")
 
-        raise HTTPException(
-            status_code=400,
-            detail="Question cannot be empty",
-        )
+    collection = get_chat_collection(chat_id)
 
-
-    # -----------------------------------------------------
-    # GET CHAT COLLECTION
-    # -----------------------------------------------------
-
-    collection = get_chat_collection(
-        chat_id
-    )
-
-
-    # -----------------------------------------------------
-    # RETRIEVE TRANSCRIPT CONTEXT
-    #
-    # If transcript chunks have already been indexed
-    # for this chat, use them as supporting context.
-    # -----------------------------------------------------
-
-    context = ""
-
+    # Retrieve transcript chunks relevant to the question.
     try:
-
         retrieval_result = retrieve_chunks(
             question,
             collection,
             top_k=5,
         )
-
-        documents = retrieval_result.get(
-            "documents",
-            [],
-        )
-
-        metadatas = retrieval_result.get(
-            "metadatas",
-            [],
-        )
-
-
-        context_parts = []
-
-
-        for i, document in enumerate(
-            documents,
-            start=1,
-        ):
-
-            metadata = (
-                metadatas[i - 1]
-                if i - 1 < len(metadatas)
-                else {}
-            )
-
-
-            if not isinstance(
-                metadata,
-                dict,
-            ):
-
-                metadata = {}
-
-
-            file_name = metadata.get(
-                "file_name",
-                "YouTube transcript",
-            )
-
-
-            start_time = metadata.get(
-                "start_time"
-            )
-
-
-            timestamp_text = ""
-
-
-            if start_time is not None:
-
-                try:
-
-                    seconds = int(
-                        float(start_time)
-                    )
-
-                    minutes = seconds // 60
-
-                    remaining_seconds = (
-                        seconds % 60
-                    )
-
-                    timestamp_text = (
-                        f"{minutes}:"
-                        f"{remaining_seconds:02d}"
-                    )
-
-                except (
-                    TypeError,
-                    ValueError,
-                ):
-
-                    timestamp_text = str(
-                        start_time
-                    )
-
-
-            context_parts.append(
-                f"""
-SOURCE {i}
-
-File:
-{file_name}
-
-Timestamp:
-{timestamp_text}
-
-Transcript:
-{document}
-"""
-            )
-
-
-        context = "\n".join(
-            context_parts
-        )
-
-
     except Exception as e:
-
-        # -------------------------------------------------
-        # Transcript retrieval should not prevent native
-        # multimodal video analysis.
-        # -------------------------------------------------
-
-        print(
-            "⚠️ YouTube transcript retrieval failed:",
-            e,
-        )
-
-        context = ""
-
-
-    # -----------------------------------------------------
-    # SAVE USER QUESTION
-    # -----------------------------------------------------
-
-    user_message = {
-        "role": "user",
-        "content": question,
-        "video_url": video_url,
-    }
-
-
-    save_message(
-        chat_id,
-        user_message,
-    )
-
-
-    # -----------------------------------------------------
-    # GEMINI MULTIMODAL ANALYSIS
-    # -----------------------------------------------------
-
-    try:
-
-        answer = generate_youtube_multimodal_response(
-            video_url=video_url,
-            context=context,
-            question=question,
-        )
-
-
-    except Exception as e:
-
-        print(
-            "❌ YouTube multimodal analysis failed:",
-            e,
-        )
-
-
         raise HTTPException(
             status_code=500,
-            detail=(
-                f"YouTube multimodal analysis failed: "
-                f"{str(e)}"
-            ),
+            detail=f"YouTube transcript retrieval failed: {str(e)}",
         )
 
+    documents = retrieval_result.get("documents") or []
+    metadatas = retrieval_result.get("metadatas") or []
 
-    # -----------------------------------------------------
-    # SAVE ASSISTANT RESPONSE
-    # -----------------------------------------------------
+    # Restrict context to YouTube transcript chunks.
+    context_parts = []
+    for index, document in enumerate(documents):
+        metadata = metadatas[index] if index < len(metadatas) else {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        if metadata.get("source_type") != "youtube":
+            continue
+
+        file_name = metadata.get("file_name", "YouTube transcript")
+        start_time = metadata.get("start_time")
+        timestamp_text = ""
+        if start_time is not None:
+            try:
+                seconds = int(float(start_time))
+                timestamp_text = f"{seconds // 60:02d}:{seconds % 60:02d}"
+            except (TypeError, ValueError):
+                timestamp_text = str(start_time)
+
+        context_parts.append(
+            f"SOURCE {len(context_parts) + 1}\n"
+            f"File: {file_name}\n"
+            f"Timestamp: [{timestamp_text}]\n"
+            f"Transcript: {document}"
+        )
+
+    retrieved_context = "\n\n".join(context_parts)
+
+    if not retrieved_context:
+        retrieved_context = "No directly matching transcript chunk was retrieved."
+
+    # Include the saved initial summary and recent conversation so follow-up
+    # questions can refer naturally to the video's earlier discussion.
+    previous_messages = get_messages(chat_id) or []
+    conversation_parts = []
+    saved_summary = ""
+
+    for message in previous_messages:
+        if not isinstance(message, dict):
+            continue
+        content = str(message.get("content", ""))
+        role = message.get("role", "")
+        if message.get("youtube_summary") and not saved_summary:
+            saved_summary = content
+        if content and content != question:
+            conversation_parts.append(
+                f"{'User' if role == 'user' else 'Assistant'}: {content}"
+            )
+
+    conversation_context = "\n".join(conversation_parts[-10:])
+
+    final_context = f"""
+YOUTUBE VIDEO SUMMARY:
+{saved_summary or 'No saved summary is available.'}
+
+RELEVANT TRANSCRIPT CHUNKS:
+{retrieved_context}
+
+RECENT CONVERSATION:
+{conversation_context}
+"""
+
+    # Save the user question before generating the answer, matching the
+    # existing chat persistence behavior.
+    save_message(
+        chat_id,
+        {
+            "role": "user",
+            "content": question,
+            "video_url": video_url,
+        },
+    )
+
+    try:
+        if should_use_youtube_multimodal(question):
+            # Existing multimodal engine is retained for visual/timestamp
+            # questions where transcript-only RAG is insufficient.
+            answer = generate_youtube_multimodal_response(
+                video_url=video_url,
+                context=final_context,
+                question=question,
+            )
+            response_mode = "youtube_multimodal"
+        else:
+            answer = generate_response(
+                context=final_context,
+                question=question,
+            )
+            response_mode = "youtube_transcript_rag"
+    except Exception as e:
+        print("❌ YouTube answer generation failed:", e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"YouTube answer generation failed: {str(e)}",
+        )
 
     assistant_message = {
         "role": "assistant",
         "content": answer,
         "video_url": video_url,
         "source_type": "youtube",
+        "response_mode": response_mode,
     }
 
-
-    save_message(
-        chat_id,
-        assistant_message,
-    )
-
-
-    # -----------------------------------------------------
-    # RESPONSE
-    # -----------------------------------------------------
+    save_message(chat_id, assistant_message)
 
     return {
         "success": True,
@@ -2487,4 +2644,6 @@ Transcript:
         "question": question,
         "answer": answer,
         "source_type": "youtube",
+        "response_mode": response_mode,
     }
+

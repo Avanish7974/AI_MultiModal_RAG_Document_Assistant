@@ -27,6 +27,13 @@
 
 let currentAction = "ask";
 
+// Active YouTube URL for the current conversation.
+let currentYouTubeUrl = "";
+
+// The player is temporarily moved into the chat stream. Keep a reference
+// to its original DOM host so chat rerenders do not destroy the player node.
+let youtubePanelHost = null;
+
 let isUploading = false;
 
 let isAsking = false;
@@ -57,152 +64,79 @@ function $(id) {
 // STATUS MESSAGE / CHATGPT-STYLE PROCESSING
 // =========================================================
 
-function setStatus(
-    message,
-    isError = false
-) {
-    const status =
-        $("statusMessage");
+function setStatus(message, isError = false) {
+    const status = $("statusMessage");
+    const chatContainer = $("chatContainer");
+    const text = message || "";
 
-    const chatContainer =
-        $("chatContainer");
-
-    const text =
-        message || "";
-
-    /*
-     * Processing messages belong INSIDE the conversation.
-     *
-     * Examples:
-     * Thinking...
-     * Analyzing images
-     * Reading documents...
-     * Generating answer...
-     */
-    const isProcessing =
-        Boolean(text) &&
-        !isError &&
-        /thinking|analyzing|processing|generating|reading|searching/i
-            .test(text);
-
-    // -----------------------------------------------------
-    // REMOVE OLD INLINE PROCESSING INDICATOR
-    // -----------------------------------------------------
-
-    const oldProcessing =
-        document.querySelector(
-            ".rag-processing-status"
-        );
-
-    if (oldProcessing) {
-        oldProcessing.remove();
-    }
-
-    // -----------------------------------------------------
-    // PROCESSING STATE
-    // -----------------------------------------------------
-
-    if (isProcessing && chatContainer) {
-
-        if (status) {
-            status.style.display =
-                "none";
-        }
-
-        const userMessages =
-            chatContainer.querySelectorAll(
-                ".message.user"
-            );
-
-        const latestUserMessage =
-            userMessages[
-                userMessages.length - 1
-            ];
-
-        if (latestUserMessage) {
-
-            const processing =
-                document.createElement(
-                    "div"
-                );
-
-            processing.className =
-                "rag-processing-status";
-
-            processing.innerHTML = `
-                <span
-                    class="processing-dot"
-                    aria-hidden="true"
-                ></span>
-
-                <span
-                    class="processing-text"
-                >${escapeHtml(text)}</span>
-
-                <span
-                    class="processing-dots"
-                    aria-hidden="true"
-                >•••</span>
-            `;
-
-            /*
-             * IMPORTANT:
-             * Insert immediately after the user's
-             * message — NOT after the composer.
-             */
-            latestUserMessage.insertAdjacentElement(
-                "afterend",
-                processing
-            );
-
-            document.body.classList.add(
-                "rag-processing"
-            );
-
-            scrollToBottom();
-
-            return;
-        }
-    }
-
-    // -----------------------------------------------------
-    // PROCESSING FINISHED
-    // -----------------------------------------------------
-
-    document.body.classList.remove(
-        "rag-processing"
+    // The status area is intentionally kept out of the top-right corner.
+    // Every upload / processing / error state belongs to the conversation.
+    const oldProcessing = document.querySelectorAll(
+        ".rag-processing-status, .rag-inline-status"
     );
+    oldProcessing.forEach(el => el.remove());
 
-    // -----------------------------------------------------
-    // NORMAL / ERROR STATUS
-    // -----------------------------------------------------
+    if (status) {
+        status.textContent = "";
+        status.style.display = "none";
+        status.classList.remove("error", "processing");
+    }
 
-    if (!status) {
+    document.body.classList.remove("rag-processing");
 
-        if (text) {
-            console.log(text);
-        }
-
+    if (!text || !chatContainer) {
         return;
     }
 
-    status.textContent =
-        text;
+    const userMessages = chatContainer.querySelectorAll(".message.user");
+    const latestUserMessage = userMessages[userMessages.length - 1];
 
-    status.classList.toggle(
-        "error",
-        Boolean(isError)
+    const lower = text.toLowerCase();
+    const isProcessing = !isError && (
+        /thinking|analyzing|processing|generating|reading|searching|uploading|upload|comparing|summarizing|creating/.test(lower)
     );
 
-    status.classList.remove(
-        "processing"
-    );
+    const row = document.createElement("div");
+    row.className = isError
+        ? "rag-inline-status rag-inline-status-error"
+        : isProcessing
+            ? "rag-processing-status"
+            : "rag-inline-status";
 
-    status.style.display =
-        text
-            ? "block"
-            : "none";
+    if (isProcessing) {
+        row.innerHTML = `
+            <span class="processing-dot" aria-hidden="true"></span>
+            <span class="processing-text">${escapeHtml(text)}</span>
+            <span class="processing-dots" aria-hidden="true">•••</span>
+        `;
+        document.body.classList.add("rag-processing");
+    } else {
+        row.innerHTML = `
+            <span class="inline-status-icon" aria-hidden="true">${isError ? "⚠" : "✓"}</span>
+            <span class="inline-status-text">${escapeHtml(text)}</span>
+        `;
+    }
+
+    // Put every state immediately after the latest user message when one
+    // exists. Otherwise it stays at the end of the conversation stream.
+    if (latestUserMessage) {
+        latestUserMessage.insertAdjacentElement("afterend", row);
+    } else {
+        chatContainer.appendChild(row);
+    }
+
+    scrollToBottom();
+
+    // Success/info messages are temporary, but errors stay until the next
+    // state/result replaces them so the user can actually read the error.
+    if (!isProcessing && !isError) {
+        window.setTimeout(() => {
+            row.classList.add("is-hiding");
+            window.setTimeout(() => row.remove(), 220);
+        }, 4200);
+    }
 }
+
 
 // =========================================================
 // EMPTY STATE
@@ -248,11 +182,19 @@ function hideEmptyState() {
 
 function clearChatInterface() {
 
+    currentYouTubeUrl = "";
+
     const container =
         $("chatContainer");
 
 
     if (container) {
+
+        const youtubePanel = $("youtubePanel");
+
+        if (youtubePanelHost && youtubePanel && youtubePanel.parentNode === container) {
+            youtubePanelHost.appendChild(youtubePanel);
+        }
 
         container.innerHTML =
             "";
@@ -663,6 +605,7 @@ function formatAnswer(text) {
 
 // =========================================================
 
+// =========================================================
 // SCROLL TO BOTTOM
 // =========================================================
 
@@ -850,6 +793,115 @@ function renderMessage(
 
 
 // =========================================================
+// YOUTUBE SOURCE CARD
+// =========================================================
+
+function renderYouTubeSourceCard(
+    videoUrl,
+    ready = true
+) {
+
+    const container = $("chatContainer");
+
+    if (!container || !videoUrl) {
+        return;
+    }
+
+    const videoId =
+        extractYouTubeVideoId(videoUrl);
+
+    if (!videoId) {
+        return;
+    }
+
+    const existing =
+        container.querySelector(".youtube-source-card");
+
+    if (existing) {
+        return;
+    }
+
+    const card =
+        document.createElement("div");
+
+    card.className = "youtube-source-card";
+
+    const thumbnail =
+        document.createElement("img");
+
+    thumbnail.className = "youtube-source-thumbnail";
+    thumbnail.src =
+        `https://img.youtube.com/vi/${encodeURIComponent(videoId)}/hqdefault.jpg`;
+    thumbnail.alt = "YouTube video thumbnail";
+    thumbnail.loading = "lazy";
+
+    const info =
+        document.createElement("div");
+
+    info.className = "youtube-source-info";
+
+    const eyebrow =
+        document.createElement("div");
+
+    eyebrow.className = "youtube-source-eyebrow";
+    eyebrow.textContent = "YouTube video";
+
+    const title =
+        document.createElement("div");
+
+    title.className = "youtube-source-title";
+    title.textContent = "Video analyzed and ready for questions";
+
+    const meta =
+        document.createElement("div");
+
+    meta.className = "youtube-source-meta";
+    meta.textContent = ready
+        ? "Transcript analyzed and summary is available in this chat"
+        : "Analyzing video...";
+
+    info.appendChild(eyebrow);
+    info.appendChild(title);
+    info.appendChild(meta);
+
+    const watch =
+        document.createElement("a");
+
+    watch.className = "youtube-source-watch";
+    watch.href = videoUrl;
+    watch.target = "_blank";
+    watch.rel = "noopener noreferrer";
+    watch.textContent = "Watch ↗";
+
+    card.appendChild(thumbnail);
+    card.appendChild(info);
+    card.appendChild(watch);
+
+    container.appendChild(card);
+}
+
+
+function updateYouTubeSourceCardStatus(ready = true) {
+
+    const card =
+        document.querySelector(".youtube-source-card");
+
+    if (!card) {
+        return;
+    }
+
+    const meta =
+        card.querySelector(".youtube-source-meta");
+
+    if (meta) {
+        meta.textContent = ready
+            ? "Transcript analyzed and summary is available in this chat"
+            : "Analyzing video...";
+    }
+}
+
+
+// =========================================================
 // RENDER ALL MESSAGES
 // =========================================================
 
@@ -868,8 +920,16 @@ function renderMessages(
     }
 
 
+    const youtubePanel = $("youtubePanel");
+
+    if (youtubePanelHost && youtubePanel && youtubePanel.parentNode === container) {
+        youtubePanelHost.appendChild(youtubePanel);
+    }
+
     container.innerHTML =
         "";
+
+    currentYouTubeUrl = "";
 
 
     if (
@@ -887,8 +947,71 @@ function renderMessages(
     hideEmptyState();
 
 
+    // Restore the active YouTube source from persisted chat messages.
+    const youtubeMessage =
+        messages.find(
+            message =>
+                message?.video_url &&
+                extractYouTubeVideoId(message.video_url)
+        );
+
+    if (youtubeMessage) {
+        currentYouTubeUrl =
+            String(youtubeMessage.video_url).trim();
+
+        renderYouTubeSourceCard(
+            currentYouTubeUrl,
+            true
+        );
+
+        // Restore the embedded player immediately below the YouTube
+        // source card and above the conversation/summary.
+        showYouTubeVideo(currentYouTubeUrl, true);
+    }
+
+
     messages.forEach(
         message => {
+
+            // Restore interactive quiz state from persisted chat data.
+            // The backend stores the complete quiz payload so refresh/chat
+            // switching does not destroy the interactive quiz.
+            if (
+                message &&
+                message.mode === "quiz" &&
+                message.quiz &&
+                Array.isArray(message.quiz.questions)
+            ) {
+
+                modeQuizData = message.quiz;
+                modeQuizSubmitted = false;
+
+                renderQuiz(
+                    modeQuizData,
+                    message.sources || []
+                );
+
+                return;
+            }
+
+            // Restore interactive flashcards from persisted chat data.
+            if (
+                message &&
+                message.mode === "flashcards" &&
+                message.flashcards &&
+                Array.isArray(message.flashcards.flashcards)
+            ) {
+
+                modeFlashcardData = message.flashcards;
+                modeFlashcardIndex = 0;
+                modeFlashcardFlipped = false;
+
+                renderFlashcards(
+                    message.sources || []
+                );
+
+                return;
+            }
 
             renderMessage(
                 message.role,
@@ -2175,7 +2298,7 @@ function initializeUploadUI() {
                 ) {
 
                     setStatus(
-                        `Uploading ${file.name}...`
+                        `📄 Uploading ${file.name}...`
                     );
 
 
@@ -2205,6 +2328,10 @@ function initializeUploadUI() {
 
                 await refreshCurrentChatDocuments();
 
+                // The upload request has completed and the document is now
+                // visible in the Documents list. Remove the live upload
+                // indicator before showing the final inline result.
+                setStatus("");
 
                 if (
                     uploadedCount === 1
@@ -2529,13 +2656,26 @@ async function sendQuestion() {
         );
 
 
+        const isYouTubeQuestion =
+            Boolean(
+                currentYouTubeUrl &&
+                extractYouTubeVideoId(currentYouTubeUrl)
+            );
+
         setStatus(
-            "Thinking..."
+            isYouTubeQuestion
+                ? "Thinking about the analyzed video..."
+                : "Thinking..."
         );
 
 
-        const response =
-            await askDocuments(
+        const response = isYouTubeQuestion
+            ? await askYouTubeMultimodal(
+                currentChatId,
+                currentYouTubeUrl,
+                submittedQuestion
+            )
+            : await askDocuments(
                 currentChatId,
                 submittedQuestion
             );
@@ -2924,467 +3064,1229 @@ function formatFlashcardResult(
 
 
 // =========================================================
-// RUN SUMMARIZE
+// DOCUMENT ASSISTANT MODES
+// SUMMARIZE / COMPARE / QUIZ / FLASHCARDS
 // =========================================================
 
-async function runSummarizeAction() {
+let modeQuizData = null;
+let modeQuizSubmitted = false;
+let modeFlashcardData = null;
+let modeFlashcardIndex = 0;
+let modeFlashcardFlipped = false;
 
-    await ensureCurrentChat();
 
+// =========================================================
+// MODE CONTROLS
+// =========================================================
 
-    if (
-        !currentChatId
-    ) {
+function getModeControls() {
 
-        throw new Error(
-            "No active chat available."
-        );
+    let section =
+        document.getElementById("modeControls");
 
+    if (section) {
+        return section;
     }
 
+    section = document.createElement("section");
+    section.id = "modeControls";
+    section.className = "mode-controls hidden";
 
-    const documents =
-        await refreshCurrentChatDocuments();
+    const chatContainer =
+        document.getElementById("chatContainer");
 
-
-    if (
-        !documents.length
-    ) {
-
-        throw new Error(
-            "Please upload at least one document first."
+    if (chatContainer && chatContainer.parentNode) {
+        chatContainer.parentNode.insertBefore(
+            section,
+            chatContainer
         );
-
     }
 
-
-    setStatus(
-        "📄 Reading all documents and generating summary..."
-    );
-
-
-    const response =
-        await summarizeDocuments(
-            currentChatId,
-            "Medium"
-        );
-
-
-    const answer =
-        getResponseAnswer(
-            response,
-            "Summary generated successfully."
-        );
-
-
-    const sources =
-        response?.sources ||
-        response?.citations ||
-        [];
-
-
-    renderMessage(
-        "assistant",
-        answer
-    );
-
-
-    renderSources(
-        sources
-    );
-
-
-    return response;
-
+    return section;
 }
 
 
-// =========================================================
-// RUN COMPARE
-// =========================================================
+function clearModeResult() {
 
-async function runCompareAction() {
+    const container =
+        document.getElementById("chatContainer");
 
-    await ensureCurrentChat();
-
-
-    if (
-        !currentChatId
-    ) {
-
-        throw new Error(
-            "No active chat available."
-        );
-
-    }
-
-
-    const documents =
-        await refreshCurrentChatDocuments();
-
-
-    if (
-        documents.length < 2
-    ) {
-
-        throw new Error(
-            "Please upload at least two documents to compare."
-        );
-
-    }
-
-
-    const files =
-        documents
-            .map(
-                document =>
-                    document.file_name ||
-                    document.filename ||
-                    document.name
-            )
-            .filter(
-                Boolean
-            );
-
-
-    if (
-        files.length < 2
-    ) {
-
-        throw new Error(
-            "Could not determine the uploaded document names."
-        );
-
-    }
-
-
-    setStatus(
-        "🔄 Comparing all uploaded documents..."
-    );
-
-
-    const response =
-        await compareDocuments(
-            currentChatId,
-            files
-        );
-
-
-    const answer =
-        getResponseAnswer(
-            response,
-            "Documents compared successfully."
-        );
-
-
-    const sources =
-        response?.sources ||
-        response?.citations ||
-        [];
-
-
-    renderMessage(
-        "assistant",
-        answer
-    );
-
-
-    renderSources(
-        sources
-    );
-
-
-    return response;
-
-}
-
-
-// =========================================================
-// RUN QUIZ
-// =========================================================
-
-async function runQuizAction() {
-
-    await ensureCurrentChat();
-
-
-    if (
-        !currentChatId
-    ) {
-
-        throw new Error(
-            "No active chat available."
-        );
-
-    }
-
-
-    const documents =
-        await refreshCurrentChatDocuments();
-
-
-    if (
-        documents.length === 0
-    ) {
-
-        throw new Error(
-            "Please upload at least one document first."
-        );
-
-    }
-
-
-    setStatus(
-        "🎯 Reading your documents and generating quiz..."
-    );
-
-
-    const response =
-        await generateDocumentQuiz(
-            currentChatId,
-            5,
-            "Medium"
-        );
-
-
-    const answer =
-        formatQuizResult(
-            response
-        );
-
-
-    const sources =
-        response?.sources ||
-        response?.citations ||
-        [];
-
-
-    renderMessage(
-        "assistant",
-        answer
-    );
-
-
-    renderSources(
-        sources
-    );
-
-
-    return response;
-
-}
-
-
-// =========================================================
-// RUN FLASHCARDS
-// =========================================================
-
-async function runFlashcardsAction() {
-
-    await ensureCurrentChat();
-
-
-    if (
-        !currentChatId
-    ) {
-
-        throw new Error(
-            "No active chat available."
-        );
-
-    }
-
-
-    const documents =
-        await refreshCurrentChatDocuments();
-
-
-    if (
-        documents.length === 0
-    ) {
-
-        throw new Error(
-            "Please upload at least one document first."
-        );
-
-    }
-
-
-    setStatus(
-        "📑 Reading your documents and creating flashcards..."
-    );
-
-
-    const response =
-        await generateDocumentFlashcards(
-            currentChatId,
-            10,
-            "Medium"
-        );
-
-
-    const answer =
-        formatFlashcardResult(
-            response
-        );
-
-
-    const sources =
-        response?.sources ||
-        response?.citations ||
-        [];
-
-
-    renderMessage(
-        "assistant",
-        answer
-    );
-
-
-    renderSources(
-        sources
-    );
-
-
-    return response;
-
-}
-
-
-// =========================================================
-// RUN SELECTED ACTION
-// =========================================================
-
-async function runDocumentAction(
-    action
-) {
-
-    if (
-        isRunningAction ||
-        isAsking ||
-        isUploading
-    ) {
-
+    if (!container) {
         return;
-
     }
 
+    container
+        .querySelectorAll(".mode-result")
+        .forEach(element => element.remove());
+}
 
-    isRunningAction =
-        true;
 
+function hideModeControls() {
+
+    const controls =
+        document.getElementById("modeControls");
+
+    if (!controls) {
+        return;
+    }
+
+    controls.classList.add("hidden");
+    controls.innerHTML = "";
+}
+
+
+function modeButton(text, id) {
+    return `
+        <button
+            id="${id}"
+            class="primary-btn mode-action-button"
+            type="button"
+        >
+            ${text}
+        </button>
+    `;
+}
+
+
+// =========================================================
+// SUMMARIZE CONTROLS
+// =========================================================
+
+function renderSummaryControls() {
+
+    const controls = getModeControls();
+
+    controls.innerHTML = `
+        <div class="mode-card">
+            <div class="mode-card-title">📝 Summarize Source</div>
+            <div class="mode-card-description">
+                Create a summary from the documents or analyzed YouTube video in this chat.
+            </div>
+
+            <div class="mode-form-row">
+                <label class="mode-field">
+                    <span>Summary length</span>
+                    <select id="summaryLength" class="mode-select">
+                        <option value="Short">Short</option>
+                        <option value="Medium" selected>Medium</option>
+                        <option value="Detailed">Detailed</option>
+                    </select>
+                </label>
+            </div>
+
+            ${modeButton("✨ Generate Summary", "summarizeBtn")}
+        </div>
+    `;
+
+    controls.classList.remove("hidden");
+
+    document
+        .getElementById("summarizeBtn")
+        ?.addEventListener("click", runSummary);
+}
+
+
+// =========================================================
+// COMPARE CONTROLS — EXACTLY 2 OR 3 DOCUMENTS
+// =========================================================
+
+async function renderCompareControls() {
+
+    const controls = getModeControls();
+
+    controls.innerHTML = `
+        <div class="mode-card">
+            <div class="mode-card-title">🔄 Compare Documents</div>
+            <div class="mode-card-description">
+                Select exactly 2 or 3 documents to compare.
+            </div>
+
+            <div class="mode-selection-hint">
+                Selected: <strong id="compareSelectedCount">0</strong> / 3
+            </div>
+
+            <div id="compareFileList" class="compare-file-list">
+                Loading documents...
+            </div>
+
+            ${modeButton("🔄 Compare Selected Documents", "compareBtn")}
+        </div>
+    `;
+
+    controls.classList.remove("hidden");
+
+    const list = document.getElementById("compareFileList");
+    const compareBtn = document.getElementById("compareBtn");
 
     try {
 
-        hideEmptyState();
+        const documents =
+            await refreshCurrentChatDocuments();
 
-        hideSources();
-
-
-        switch (action) {
-
-            case "summarize":
-
-                await runSummarizeAction();
-
-                break;
-
-
-            case "compare":
-
-                await runCompareAction();
-
-                break;
-
-
-            case "quiz":
-
-                await runQuizAction();
-
-                break;
-
-
-            case "flashcards":
-
-                await runFlashcardsAction();
-
-                break;
-
-
-            default:
-
-                throw new Error(
-                    "Unknown document action."
-                );
-
+        if (!documents.length) {
+            list.innerHTML = `
+                <div class="mode-empty">
+                    No documents uploaded in this chat.
+                </div>
+            `;
+            compareBtn.disabled = true;
+            compareBtn.classList.add("compare-locked");
+            return;
         }
 
+        // Keep Compare visually locked until at least two documents exist.
+        compareBtn.classList.toggle(
+            "compare-locked",
+            documents.length < 2
+        );
 
-        if (
-            typeof loadChats ===
-            "function"
-        ) {
+        list.innerHTML = documents
+            .map((file, index) => {
+                const name =
+                    file.file_name ||
+                    file.filename ||
+                    file.name ||
+                    `Document ${index + 1}`;
 
-            try {
+                return `
+                    <label class="compare-file-item">
+                        <input
+                            type="checkbox"
+                            class="compare-checkbox"
+                            value="${escapeHtml(name)}"
+                        >
+                        <span class="compare-file-name">
+                            ${escapeHtml(name)}
+                        </span>
+                    </label>
+                `;
+            })
+            .join("");
 
-                await loadChats();
+        const checkboxes =
+            Array.from(
+                list.querySelectorAll(".compare-checkbox")
+            );
 
-            } catch (error) {
+        const updateCompareState = () => {
+            const selected =
+                checkboxes.filter(checkbox => checkbox.checked);
 
-                console.warn(
-                    "Could not refresh chats:",
-                    error
-                );
+            const countElement =
+                document.getElementById("compareSelectedCount");
 
+            if (countElement) {
+                countElement.textContent = String(selected.length);
             }
 
-        }
+            // Hard limit: only 3 documents can be selected.
+            checkboxes.forEach(checkbox => {
+                checkbox.disabled =
+                    !checkbox.checked && selected.length >= 3;
+            });
 
+            compareBtn.disabled =
+                documents.length < 2 ||
+                selected.length < 2 ||
+                selected.length > 3;
 
-        if (
-            typeof updateActiveChatStyles ===
-            "function"
-        ) {
+            compareBtn.classList.toggle(
+                "compare-locked",
+                documents.length < 2
+            );
+        };
 
-            updateActiveChatStyles();
+        checkboxes.forEach(checkbox => {
+            checkbox.addEventListener("change", updateCompareState);
+        });
 
-        } else if (
-            window.RAGChats &&
-            typeof window.RAGChats.highlightCurrentChat ===
-                "function"
-        ) {
-
-            window.RAGChats
-                .highlightCurrentChat();
-
-        }
-
-
-        setStatus("");
-
+        compareBtn.addEventListener("click", runComparison);
+        updateCompareState();
 
     } catch (error) {
 
-        console.error(
-            `Action "${action}" failed:`,
-            error
-        );
+        list.innerHTML = `
+            <div class="mode-error">
+                Could not load documents.
+            </div>
+        `;
 
+        compareBtn.disabled = true;
+        compareBtn.classList.add("compare-locked");
 
         setStatus(
-            error.message ||
-            `Could not complete ${action}.`,
+            error.message || "Could not load documents.",
+            true
+        );
+    }
+}
+
+
+// =========================================================
+// QUIZ CONTROLS — DEFAULT 6 QUESTIONS
+// =========================================================
+
+function renderQuizControls() {
+
+    const controls = getModeControls();
+
+    controls.innerHTML = `
+        <div class="mode-card">
+            <div class="mode-card-title">🎯 Generate Quiz</div>
+            <div class="mode-card-description">
+                Create an interactive MCQ quiz from your documents or analyzed YouTube video.
+                Answers stay hidden until you submit.
+            </div>
+
+            <div class="mode-form-grid">
+                <label class="mode-field">
+                    <span>Questions</span>
+                    <select id="quizQuestionCount" class="mode-select">
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="4">4</option>
+                        <option value="5">5</option>
+                        <option value="6" selected>6</option>
+                        <option value="7">7</option>
+                        <option value="8">8</option>
+                        <option value="9">9</option>
+                        <option value="10">10</option>
+                    </select>
+                </label>
+
+                <label class="mode-field">
+                    <span>Difficulty</span>
+                    <select id="quizDifficulty" class="mode-select">
+                        <option value="Easy">Easy</option>
+                        <option value="Medium" selected>Medium</option>
+                        <option value="Hard">Hard</option>
+                    </select>
+                </label>
+            </div>
+
+            ${modeButton("🎯 Generate Quiz", "generateQuizBtn")}
+        </div>
+    `;
+
+    controls.classList.remove("hidden");
+
+    document
+        .getElementById("generateQuizBtn")
+        ?.addEventListener("click", runQuiz);
+}
+
+
+// =========================================================
+// FLASHCARD CONTROLS
+// =========================================================
+
+function renderFlashcardControls() {
+
+    const controls = getModeControls();
+
+    controls.innerHTML = `
+        <div class="mode-card">
+            <div class="mode-card-title">📑 Flashcards</div>
+            <div class="mode-card-description">
+                Generate interactive revision cards from your documents.
+            </div>
+
+            <div class="mode-form-grid">
+                <label class="mode-field">
+                    <span>Number of cards</span>
+                    <select id="flashcardCount" class="mode-select">
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="4">4</option>
+                        <option value="5">5</option>
+                        <option value="6">6</option>
+                        <option value="7">7</option>
+                        <option value="8">8</option>
+                        <option value="9">9</option>
+                        <option value="10" selected>10</option>
+                    </select>
+                </label>
+
+                <label class="mode-field">
+                    <span>Difficulty</span>
+                    <select id="flashcardDifficulty" class="mode-select">
+                        <option value="Easy">Easy</option>
+                        <option value="Medium" selected>Medium</option>
+                        <option value="Hard">Hard</option>
+                    </select>
+                </label>
+            </div>
+
+            ${modeButton("📑 Generate Flashcards", "generateFlashcardsBtn")}
+        </div>
+    `;
+
+    controls.classList.remove("hidden");
+
+    document
+        .getElementById("generateFlashcardsBtn")
+        ?.addEventListener("click", runFlashcards);
+}
+
+
+// =========================================================
+// YOUTUBE CONTEXT HELPER
+// =========================================================
+// A chat may contain either uploaded documents or an analyzed
+// YouTube transcript.  The AI modes should work with both.
+
+function hasYouTubeContext() {
+    return Boolean(
+        currentYouTubeUrl &&
+        extractYouTubeVideoId(currentYouTubeUrl)
+    );
+}
+
+async function getModeSourceState() {
+    const documents = await refreshCurrentChatDocuments();
+
+    let youtube = {
+        analyzed: false,
+        video_url: null,
+        video_id: null
+    };
+
+    // Do not rely only on frontend state. The backend is the source of truth
+    // when a chat is reopened or when the page was refreshed.
+    if (currentChatId && typeof getYouTubeStatus === "function") {
+        try {
+            const response = await getYouTubeStatus(currentChatId);
+            if (response?.analyzed) {
+                youtube = response;
+                if (response.video_url) {
+                    currentYouTubeUrl = String(response.video_url).trim();
+                }
+            }
+        } catch (error) {
+            console.warn("Could not read YouTube mode status:", error);
+        }
+    }
+
+    return {
+        documents,
+        youtube,
+        hasYoutube: Boolean(youtube.analyzed && youtube.video_url),
+        hasSource: Boolean(documents.length) || Boolean(youtube.analyzed && youtube.video_url)
+    };
+}
+
+
+// =========================================================
+// SUMMARY
+// =========================================================
+
+async function runSummary() {
+
+    if (isRunningAction || isAsking || isUploading) {
+        return;
+    }
+
+    isRunningAction = true;
+
+    try {
+
+        await ensureCurrentChat();
+
+        const sourceState = await getModeSourceState();
+        const documents = sourceState.documents;
+
+        const length =
+            document.getElementById("summaryLength")?.value ||
+            "Medium";
+
+        setStatus(
+            sourceState.hasYoutube && !documents.length
+                ? "📝 Reading the video transcript and generating summary..."
+                : "📝 Reading the available source and generating summary..."
+        );
+
+        const response =
+            await summarizeDocuments(
+                currentChatId,
+                length
+            );
+
+        clearModeResult();
+        hideModeControls();
+
+        renderMessage(
+            "assistant",
+            getResponseAnswer(
+                response,
+                "Summary generated successfully."
+            )
+        );
+
+        renderSources(
+            response?.sources ||
+            response?.citations ||
+            []
+        );
+
+        setStatus("");
+        await refreshChatsAfterMode();
+
+    } catch (error) {
+
+        console.error("Summary error:", error);
+
+        setStatus(
+            error.message || "Could not summarize documents.",
             true
         );
 
-
     } finally {
+        isRunningAction = false;
+    }
+}
 
-        isRunningAction =
-            false;
 
+// =========================================================
+// COMPARISON
+// =========================================================
+
+async function runComparison() {
+
+    if (isRunningAction || isAsking || isUploading) {
+        return;
     }
 
+    const selected =
+        Array.from(
+            document.querySelectorAll(
+                ".compare-checkbox:checked"
+            )
+        )
+        .map(checkbox => checkbox.value)
+        .filter(Boolean);
+
+    if (selected.length < 2) {
+        setStatus(
+            "Please select at least two documents.",
+            true
+        );
+        return;
+    }
+
+    if (selected.length > 3) {
+        setStatus(
+            "You can compare a maximum of three documents.",
+            true
+        );
+        return;
+    }
+
+    isRunningAction = true;
+
+    try {
+
+        await ensureCurrentChat();
+
+        setStatus(
+            "🔄 Comparing selected documents..."
+        );
+
+        const response =
+            await compareDocuments(
+                currentChatId,
+                selected
+            );
+
+        clearModeResult();
+        hideModeControls();
+
+        renderMessage(
+            "assistant",
+            getResponseAnswer(
+                response,
+                "Documents compared successfully."
+            )
+        );
+
+        renderSources(
+            response?.sources ||
+            response?.citations ||
+            []
+        );
+
+        setStatus("");
+        await refreshChatsAfterMode();
+
+    } catch (error) {
+
+        console.error("Comparison error:", error);
+
+        setStatus(
+            error.message || "Could not compare documents.",
+            true
+        );
+
+    } finally {
+        isRunningAction = false;
+    }
+}
+
+
+// =========================================================
+// QUIZ GENERATION
+// =========================================================
+
+async function runQuiz() {
+
+    if (isRunningAction || isAsking || isUploading) {
+        return;
+    }
+
+    isRunningAction = true;
+
+    try {
+
+        await ensureCurrentChat();
+
+        const sourceState = await getModeSourceState();
+        const documents = sourceState.documents;
+
+        const count = Math.min(
+            10,
+            Math.max(
+                2,
+                Number(
+                    document.getElementById("quizQuestionCount")?.value || 6
+                )
+            )
+        );
+        const difficulty =
+            document.getElementById("quizDifficulty")?.value ||
+            "Medium";
+
+        setStatus(
+            sourceState.hasYoutube && !documents.length
+                ? `🎯 Reading the video transcript and generating ${count}-question quiz...`
+                : `🎯 Reading the available source and generating ${count}-question quiz...`
+        );
+
+        const response =
+            await generateDocumentQuiz(
+                currentChatId,
+                count,
+                difficulty
+            );
+
+        modeQuizData =
+            response?.quiz ||
+            response?.data ||
+            response;
+
+        if (!modeQuizData || !Array.isArray(modeQuizData.questions) || !modeQuizData.questions.length) {
+            throw new Error(
+                "The quiz generator returned an invalid quiz format."
+            );
+        }
+
+        // Enforce the requested 2–10 question range on the client.
+        modeQuizData.questions =
+            modeQuizData.questions.slice(0, count);
+
+        modeQuizSubmitted = false;
+
+        clearModeResult();
+        hideModeControls();
+
+        renderQuiz(
+            modeQuizData,
+            response?.sources || response?.citations || []
+        );
+
+        setStatus("");
+        await refreshChatsAfterMode();
+
+    } catch (error) {
+
+        console.error("Quiz error:", error);
+
+        setStatus(
+            error.message || "Could not generate quiz.",
+            true
+        );
+
+    } finally {
+        isRunningAction = false;
+    }
+}
+
+
+function getCorrectAnswerIndex(question) {
+
+    if (Number.isInteger(question?.correct_answer)) {
+        return question.correct_answer;
+    }
+
+    if (Number.isInteger(question?.correctAnswer)) {
+        return question.correctAnswer;
+    }
+
+    if (typeof question?.correct_answer === "string") {
+        const value = question.correct_answer.trim();
+        const numeric = Number(value);
+
+        if (Number.isInteger(numeric)) {
+            return numeric;
+        }
+
+        if (Array.isArray(question.options)) {
+            return question.options.findIndex(
+                option => String(option).trim() === value
+            );
+        }
+    }
+
+    if (typeof question?.answer === "string" && Array.isArray(question.options)) {
+        const value = question.answer.trim();
+        const numeric = Number(value);
+
+        if (Number.isInteger(numeric)) {
+            return numeric;
+        }
+
+        return question.options.findIndex(
+            option => String(option).trim() === value
+        );
+    }
+
+    return -1;
+}
+
+
+// =========================================================
+// RENDER INTERACTIVE QUIZ
+// =========================================================
+
+function renderQuiz(quiz, sources) {
+
+    const container =
+        document.getElementById("chatContainer");
+
+    if (!container) {
+        return;
+    }
+
+    hideEmptyState();
+
+    const questions =
+        Array.isArray(quiz?.questions)
+            ? quiz.questions.slice(0, 10)
+            : [];
+
+    const result = document.createElement("div");
+    result.className = "mode-result quiz-result";
+
+    result.innerHTML = `
+        <div class="mode-result-header">🧠 Interactive Quiz</div>
+        <div class="mode-result-subtitle">
+            ${questions.length} questions • Answers are revealed after submission
+        </div>
+        <div id="quizQuestions"></div>
+
+        <div class="quiz-submit-row">
+            <button id="submitQuizBtn" class="primary-btn" type="button">
+                ✅ Submit Quiz
+            </button>
+        </div>
+
+        <div id="quizScore" class="quiz-score hidden"></div>
+    `;
+
+    container.appendChild(result);
+
+    const questionsContainer =
+        result.querySelector("#quizQuestions");
+
+    questions.forEach((question, index) => {
+
+        const questionElement =
+            document.createElement("div");
+
+        questionElement.className = "quiz-question";
+
+        const options =
+            Array.isArray(question.options)
+                ? question.options
+                : Array.isArray(question.choices)
+                    ? question.choices
+                    : [];
+
+        questionElement.innerHTML = `
+            <div class="quiz-question-title">
+                Question ${index + 1}
+            </div>
+
+            <div class="quiz-question-text">
+                ${escapeHtml(
+                    question.question ||
+                    question.text ||
+                    ""
+                )}
+            </div>
+
+            <div class="quiz-options">
+                ${options
+                    .map((option, optionIndex) => `
+                        <label class="quiz-option">
+                            <input
+                                type="radio"
+                                name="quiz_${index}"
+                                value="${optionIndex}"
+                            >
+                            <span class="quiz-option-letter">
+                                ${String.fromCharCode(65 + optionIndex)}
+                            </span>
+                            <span class="quiz-option-text">
+                                ${escapeHtml(option)}
+                            </span>
+                        </label>
+                    `)
+                    .join("")}
+            </div>
+
+            <div class="quiz-review hidden"></div>
+        `;
+
+        questionsContainer.appendChild(questionElement);
+    });
+
+    const submitButton =
+        result.querySelector("#submitQuizBtn");
+
+    submitButton.addEventListener("click", () => {
+
+        if (modeQuizSubmitted) {
+            return;
+        }
+
+        let score = 0;
+        let answered = 0;
+
+        questions.forEach((question, index) => {
+
+            const selected =
+                result.querySelector(
+                    `input[name="quiz_${index}"]:checked`
+                );
+
+            const questionElement =
+                result.querySelectorAll(".quiz-question")[index];
+
+            const options =
+                questionElement.querySelectorAll(
+                    `input[name="quiz_${index}"]`
+                );
+
+            const correctIndex =
+                getCorrectAnswerIndex(question);
+
+            if (selected) {
+                answered++;
+            }
+
+            options.forEach(option => {
+                const label =
+                    option.closest(".quiz-option");
+
+                if (!label) {
+                    return;
+                }
+
+                label.classList.remove("correct", "wrong");
+
+                if (
+                    Number(option.value) ===
+                    correctIndex
+                ) {
+                    label.classList.add("correct");
+                }
+            });
+
+            if (
+                selected &&
+                Number(selected.value) === correctIndex
+            ) {
+                score++;
+            } else if (selected) {
+                selected
+                    .closest(".quiz-option")
+                    ?.classList.add("wrong");
+            }
+
+            const review =
+                questionElement.querySelector(".quiz-review");
+
+            const correctText =
+                Array.isArray(question.options) &&
+                correctIndex >= 0
+                    ? question.options[correctIndex]
+                    : question.correct_answer ||
+                      question.answer ||
+                      "Not available";
+
+            const yourText =
+                selected && Array.isArray(question.options)
+                    ? question.options[Number(selected.value)]
+                    : "Not answered";
+
+            review.innerHTML = `
+                <div class="quiz-review-answer">
+                    ${
+                        selected &&
+                        Number(selected.value) === correctIndex
+                            ? "✓ Correct"
+                            : "✗ Incorrect"
+                    }
+                </div>
+                <div>Your answer: <strong>${escapeHtml(yourText)}</strong></div>
+                <div>Correct answer: <strong>${escapeHtml(correctText)}</strong></div>
+                ${
+                    question.explanation
+                        ? `<div class="quiz-explanation">💡 ${escapeHtml(question.explanation)}</div>`
+                        : ""
+                }
+            `;
+
+            review.classList.remove("hidden");
+        });
+
+        modeQuizSubmitted = true;
+
+        const percentage =
+            questions.length
+                ? Math.round(
+                    (score / questions.length) * 100
+                )
+                : 0;
+
+        const scoreElement =
+            result.querySelector("#quizScore");
+
+        scoreElement.innerHTML = `
+            <div class="quiz-score-main">
+                ${percentage}%
+            </div>
+            <div class="quiz-score-detail">
+                Score: ${score} / ${questions.length}
+                • Answered: ${answered} / ${questions.length}
+            </div>
+        `;
+
+        scoreElement.classList.remove("hidden");
+        submitButton.disabled = true;
+        submitButton.textContent = "✓ Quiz Submitted";
+
+        result
+            .querySelectorAll("input[type=radio]")
+            .forEach(input => {
+                input.disabled = true;
+            });
+
+        scrollToBottom();
+    });
+
+    if (sources.length) {
+        renderSources(sources);
+    }
+
+    scrollToBottom();
+}
+
+
+// =========================================================
+// FLASHCARDS
+// =========================================================
+
+async function runFlashcards() {
+
+    if (isRunningAction || isAsking || isUploading) {
+        return;
+    }
+
+    isRunningAction = true;
+
+    try {
+
+        await ensureCurrentChat();
+
+        const sourceState = await getModeSourceState();
+        const documents = sourceState.documents;
+
+        const count = Math.min(
+            10,
+            Math.max(
+                2,
+                Number(
+                    document.getElementById("flashcardCount")?.value || 10
+                )
+            )
+        );
+
+        const difficulty =
+            document.getElementById("flashcardDifficulty")?.value ||
+            "Medium";
+
+        setStatus(
+            sourceState.hasYoutube && !documents.length
+                ? "📑 Creating flashcards from the video transcript..."
+                : "📑 Creating interactive flashcards..."
+        );
+
+        const response =
+            await generateDocumentFlashcards(
+                currentChatId,
+                count,
+                difficulty
+            );
+
+        const flashcardPayload = response?.flashcards;
+        const raw =
+            Array.isArray(flashcardPayload)
+                ? { flashcards: flashcardPayload }
+                : flashcardPayload ||
+                  response?.data ||
+                  response;
+
+        const cards =
+            Array.isArray(raw?.flashcards)
+                ? raw.flashcards
+                : [];
+
+        if (!cards.length) {
+            throw new Error(
+                "The flashcard generator returned no flashcards."
+            );
+        }
+
+        modeFlashcardData = {
+            ...raw,
+            flashcards: cards
+                .map(card => ({
+                    ...card,
+                    front:
+                        card.front ||
+                        card.question ||
+                        "",
+                    back:
+                        card.back ||
+                        card.answer ||
+                        ""
+                }))
+        };
+
+        modeFlashcardIndex = 0;
+        modeFlashcardFlipped = false;
+
+        clearModeResult();
+        hideModeControls();
+
+        renderFlashcards(
+            response?.sources || response?.citations || []
+        );
+
+        setStatus("");
+        await refreshChatsAfterMode();
+
+    } catch (error) {
+
+        console.error("Flashcard error:", error);
+
+        setStatus(
+            error.message || "Could not generate flashcards.",
+            true
+        );
+
+    } finally {
+        isRunningAction = false;
+    }
+}
+
+
+function renderFlashcards(sources) {
+
+    const container =
+        document.getElementById("chatContainer");
+
+    if (!container) {
+        return;
+    }
+
+    hideEmptyState();
+
+    const cards =
+        modeFlashcardData?.flashcards || [];
+
+    if (!cards.length) {
+        return;
+    }
+
+    const result = document.createElement("div");
+    result.className = "mode-result flashcard-result";
+
+    result.innerHTML = `
+        <div class="mode-result-header">📑 Flashcards</div>
+        <div id="flashcardCounter" class="mode-result-subtitle"></div>
+
+        <div id="flashcard" class="flashcard"></div>
+
+        <div class="flashcard-actions">
+            <button
+                id="prevFlashcard"
+                class="secondary-btn"
+                type="button"
+            >
+                ← Previous
+            </button>
+
+            <button
+                id="flipFlashcard"
+                class="primary-btn"
+                type="button"
+            >
+                🔄 Flip Card
+            </button>
+
+            <button
+                id="nextFlashcard"
+                class="secondary-btn"
+                type="button"
+            >
+                Next →
+            </button>
+        </div>
+    `;
+
+    container.appendChild(result);
+
+    result
+        .querySelector("#flipFlashcard")
+        .addEventListener("click", () => {
+            modeFlashcardFlipped = !modeFlashcardFlipped;
+            updateFlashcard(result);
+        });
+
+    result
+        .querySelector("#prevFlashcard")
+        .addEventListener("click", () => {
+            if (modeFlashcardIndex > 0) {
+                modeFlashcardIndex--;
+                modeFlashcardFlipped = false;
+                updateFlashcard(result);
+            }
+        });
+
+    result
+        .querySelector("#nextFlashcard")
+        .addEventListener("click", () => {
+            if (
+                modeFlashcardIndex <
+                cards.length - 1
+            ) {
+                modeFlashcardIndex++;
+                modeFlashcardFlipped = false;
+                updateFlashcard(result);
+            }
+        });
+
+    updateFlashcard(result);
+
+    if (sources.length) {
+        renderSources(sources);
+    }
+
+    scrollToBottom();
+}
+
+
+function updateFlashcard(result) {
+
+    const cards =
+        modeFlashcardData?.flashcards || [];
+
+    if (!cards.length) {
+        return;
+    }
+
+    const card =
+        cards[modeFlashcardIndex];
+
+    const flashcard =
+        result.querySelector("#flashcard");
+
+    const counter =
+        result.querySelector("#flashcardCounter");
+
+    if (!card || !flashcard || !counter) {
+        return;
+    }
+
+    counter.textContent =
+        `Card ${modeFlashcardIndex + 1} of ${cards.length}`;
+
+    const text =
+        modeFlashcardFlipped
+            ? card.back
+            : card.front;
+
+    flashcard.innerHTML = `
+        <div class="flashcard-label">
+            ${modeFlashcardFlipped ? "ANSWER" : "QUESTION"}
+        </div>
+
+        <div class="flashcard-text">
+            ${escapeHtml(text || "")}
+        </div>
+
+        ${
+            modeFlashcardFlipped && card.source
+                ? `
+                    <div class="flashcard-source">
+                        Source: ${escapeHtml(card.source)}
+                    </div>
+                `
+                : ""
+        }
+    `;
+
+    const previous =
+        result.querySelector("#prevFlashcard");
+
+    const next =
+        result.querySelector("#nextFlashcard");
+
+    previous.disabled =
+        modeFlashcardIndex === 0;
+
+    next.disabled =
+        modeFlashcardIndex === cards.length - 1;
+}
+
+
+// =========================================================
+// REFRESH CHAT SIDEBAR
+// =========================================================
+
+async function refreshChatsAfterMode() {
+
+    if (typeof loadChats === "function") {
+        try {
+            await loadChats();
+        } catch (error) {
+            console.warn(
+                "Could not refresh chats:",
+                error
+            );
+        }
+    }
 }
 
 
@@ -3395,108 +4297,91 @@ async function runDocumentAction(
 function initializeActionButtons() {
 
     const buttons =
-        document.querySelectorAll(
-            ".action-btn"
-        );
+        document.querySelectorAll(".action-btn");
 
-
-    if (
-        !buttons.length
-    ) {
-
-        console.warn(
-            "No action buttons found."
-        );
-
+    if (!buttons.length) {
+        console.warn("No action buttons found.");
         return;
-
     }
 
-
-    buttons.forEach(
-        button => {
-
-            button.addEventListener(
-                "click",
-                async () => {
-
-                    if (
-                        isRunningAction
-                    ) {
-
-                        return;
-
-                    }
-
-
-                    buttons.forEach(
-                        item => {
-
-                            item.classList.remove(
-                                "active"
-                            );
-
-                        }
-                    );
-
-
-                    button.classList.add(
-                        "active"
-                    );
-
-
-                    currentAction =
-                        button.dataset.action ||
-                        "ask";
-
-
-                    // -------------------------------------------------
-                    // ASK
-                    // -------------------------------------------------
-
-                    if (
-                        currentAction ===
-                        "ask"
-                    ) {
-
-                        setStatus("");
-
-                        const input =
-                            $("questionInput");
-
-
-                        if (input) {
-
-                            input.focus();
-
-                        }
-
-
-                        return;
-
-                    }
-
-
-                    // -------------------------------------------------
-                    // DOCUMENT ACTION
-                    // -------------------------------------------------
-
-                    await runDocumentAction(
-                        currentAction
-                    );
-
-                }
-            );
-
+    // Prevent duplicate listeners if initialization is called again.
+    buttons.forEach(button => {
+        if (button.dataset.modeInitialized === "true") {
+            return;
         }
-    );
 
+        button.dataset.modeInitialized = "true";
+
+        button.addEventListener("click", async () => {
+
+            if (isRunningAction || isAsking || isUploading) {
+                return;
+            }
+
+            buttons.forEach(item => {
+                item.classList.remove("active");
+            });
+
+            button.classList.add("active");
+
+            currentAction =
+                button.dataset.action || "ask";
+
+            clearModeResult();
+            hideModeControls();
+
+            if (currentAction === "ask") {
+                setStatus("");
+                document.getElementById("questionInput")?.focus();
+                return;
+            }
+
+            if (currentAction === "summarize") {
+                renderSummaryControls();
+                return;
+            }
+
+            if (currentAction === "compare") {
+                await renderCompareControls();
+                return;
+            }
+
+            if (currentAction === "quiz") {
+                renderQuizControls();
+                return;
+            }
+
+            if (currentAction === "flashcards") {
+                renderFlashcardControls();
+                return;
+            }
+
+            // YouTube mode opens the existing YouTube workflow.
+            if (currentAction === "youtube") {
+                const uploadPanel = $("uploadPanel");
+                const youtubeInput = $("youtubeUrl");
+
+                if (uploadPanel) {
+                    uploadPanel.classList.add("open");
+                }
+
+                if (youtubeInput) {
+                    window.setTimeout(() => youtubeInput.focus(), 0);
+                }
+
+                setStatus(
+                    "Paste a YouTube URL to start video analysis."
+                );
+            }
+        });
+    });
 }
 
 
 // =========================================================
 // YOUTUBE VIDEO ID
 // =========================================================
+
 
 function extractYouTubeVideoId(
     url
@@ -3600,61 +4485,55 @@ function extractYouTubeVideoId(
 // =========================================================
 
 function showYouTubeVideo(
-    url
+    url,
+    silent = false
 ) {
 
-    const panel =
-        $("youtubePanel");
+    const panel = $("youtubePanel");
+    const iframe = $("youtubePlayer");
+    const container = $("chatContainer");
 
-    const iframe =
-        $("youtubePlayer");
-
-
-    if (
-        !panel ||
-        !iframe
-    ) {
-
+    if (!panel || !iframe || !container) {
         return;
-
     }
 
+    if (!youtubePanelHost) {
+        youtubePanelHost = panel.parentNode;
+    }
 
-    const videoId =
-        extractYouTubeVideoId(
-            url
-        );
-
+    const videoId = extractYouTubeVideoId(url);
 
     if (!videoId) {
-
-        setStatus(
-            "Please enter a valid YouTube URL.",
-            true
-        );
-
+        if (!silent) {
+            setStatus(
+                "Please enter a valid YouTube URL.",
+                true
+            );
+        }
         return;
-
     }
 
-
+    // The player belongs directly to the conversation stream. This gives
+    // us the clean order:
+    // YouTube source card → video player → AI summary → chat.
     iframe.src =
-        `https://www.youtube.com/embed/${videoId}?enablejsapi=1`;
+        `https://www.youtube-nocookie.com/embed/${videoId}?enablejsapi=1&rel=0`;
 
+    panel.classList.remove("hidden");
+    panel.style.display = "block";
 
-    panel.classList.remove(
-        "hidden"
-    );
+    const sourceCard =
+        container.querySelector(".youtube-source-card");
 
+    if (sourceCard) {
+        sourceCard.insertAdjacentElement("afterend", panel);
+    } else {
+        container.insertBefore(panel, container.firstChild);
+    }
 
-    panel.style.display =
-        "block";
-
-
-    setStatus(
-        "YouTube video loaded."
-    );
-
+    if (!silent) {
+        setStatus("YouTube video loaded.");
+    }
 }
 
 
@@ -3663,6 +4542,8 @@ function showYouTubeVideo(
 // =========================================================
 
 function hideYouTubeVideo() {
+
+    currentYouTubeUrl = "";
 
     const panel =
         $("youtubePanel");
@@ -3688,6 +4569,10 @@ function hideYouTubeVideo() {
 
         panel.style.display =
             "none";
+
+        if (youtubePanelHost && panel.parentNode !== youtubePanelHost) {
+            youtubePanelHost.appendChild(panel);
+        }
 
     }
 
@@ -3767,41 +4652,112 @@ function initializeYouTubeUI() {
                 }
 
 
+                if (isAsking || isRunningAction) {
+                    return;
+                }
+
                 try {
 
                     await ensureCurrentChat();
 
+                    if (!currentChatId) {
+                        throw new Error(
+                            "No active chat available."
+                        );
+                    }
 
-                    showYouTubeVideo(
-                        url
+                    currentAction = "youtube";
+                    currentYouTubeUrl = url;
+
+                    const uploadPanel = $("uploadPanel");
+                    if (uploadPanel) {
+                        uploadPanel.classList.remove("open");
+                    }
+
+                    hideEmptyState();
+
+                    // Keep the conversation focused on the AI summary.
+                    // The video itself is available from the compact source card.
+
+                    // Analyze the video exactly once. The backend stores the
+                    // resulting summary as persistent video context for this chat.
+                    setStatus(
+                        "Extracting transcript and generating a video summary..."
                     );
 
+                    isAsking = true;
+                    analyzeBtn.disabled = true;
 
-                    // -------------------------------------------------
-                    // YouTube UI currently loads the video.
-                    //
-                    // Actual multimodal question is sent through
-                    // askYouTubeMultimodal().
-                    // -------------------------------------------------
+                    renderYouTubeSourceCard(
+                        currentYouTubeUrl,
+                        false
+                    );
+
+                    // Show the real YouTube player immediately. The user can
+                    // watch while transcript analysis is running.
+                    showYouTubeVideo(
+                        currentYouTubeUrl,
+                        true
+                    );
+
+                    const response =
+                        await analyzeYouTubeVideo(
+                            currentChatId,
+                            currentYouTubeUrl
+                        );
+
+                    const answer =
+                        getResponseAnswer(
+                            response,
+                            "No YouTube summary returned."
+                        );
+
+                    renderMessage(
+                        "assistant",
+                        answer
+                    );
+
+                    updateYouTubeSourceCardStatus(true);
+
+                    const questionInput = $("questionInput");
+                    if (questionInput) {
+                        questionInput.placeholder = "Ask anything about this video...";
+                    }
+
+                    if (typeof loadChats === "function") {
+                        try {
+                            await loadChats();
+                        } catch (loadError) {
+                            console.warn(
+                                "Could not refresh chats after YouTube analysis:",
+                                loadError
+                            );
+                        }
+                    }
 
                     setStatus(
-                        "YouTube video loaded."
+                        "YouTube summary ready. You can now ask questions."
                     );
-
 
                 } catch (error) {
 
                     console.error(
-                        "YouTube initialization failed:",
+                        "YouTube analysis failed:",
                         error
                     );
 
+                    hideYouTubeVideo();
 
                     setStatus(
                         error.message ||
-                        "Could not load YouTube video.",
+                        "Could not analyze YouTube video.",
                         true
                     );
+
+                } finally {
+
+                    isAsking = false;
+                    analyzeBtn.disabled = false;
 
                 }
 
@@ -4420,6 +5376,8 @@ window.RAGApp = {
     refreshCurrentChatDocuments,
 
     extractYouTubeVideoId,
+    renderYouTubeSourceCard,
+    updateYouTubeSourceCardStatus,
 
     showYouTubeVideo,
 

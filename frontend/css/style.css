@@ -12163,3 +12163,623 @@ body.rag-processing .rag-processing-status {
 /* ============================================================
    END — COMPARISON VERTICAL GAP FIX
    ============================================================ */
+
+
+/* ============================================================
+   SIDEBAR FINAL LAYOUT FIX — RECENT CHATS + DOCUMENTS
+   ============================================================
+   Keep the sidebar itself scrollable, but make Recent Chats and
+   Documents independent sections in normal document flow.
+
+   Recent Chats:
+   - show only the first 6 chats
+   - the JS adds a "View all" button when there are more than 6
+   - clicking View all expands the complete list
+   - no nested scrollbar
+
+   Documents:
+   - remain a separate section below Recent Chats
+   - all documents remain reachable through the sidebar scrollbar
+   ============================================================ */
+
+/* The sidebar is the ONLY vertical scroll container. */
+.sidebar {
+    height: 100vh !important;
+    max-height: 100vh !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+
+    display: flex !important;
+    flex-direction: column !important;
+
+    scrollbar-width: thin !important;
+    scrollbar-color: #343a49 transparent !important;
+
+    overscroll-behavior: contain !important;
+    -webkit-overflow-scrolling: touch !important;
+}
+
+/* Do not let sidebar children create their own vertical scroll. */
+.sidebar > * {
+    flex-shrink: 0 !important;
+}
+
+/* ============================================================
+   RECENT CHATS — COMPACT 6-CHAT PREVIEW
+   ============================================================ */
+
+.recent-section {
+    flex: 0 0 auto !important;
+    min-height: 0 !important;
+}
+
+/* No nested scrollbar here. */
+.recent-chats {
+    max-height: none !important;
+    height: auto !important;
+    overflow: visible !important;
+    scrollbar-width: none !important;
+}
+
+/* Hide chats 7+ until View all is clicked. */
+.recent-section:not(.recent-expanded)
+.recent-chats
+.chat-row:nth-child(n + 7) {
+    display: none !important;
+}
+
+/* Slightly tighter spacing so six chats fit naturally. */
+.recent-chats {
+    gap: 2px !important;
+}
+
+/* ============================================================
+   RECENT CHATS — VIEW ALL BUTTON
+   ============================================================ */
+
+.recent-view-all-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    width: 100%;
+    min-height: 34px;
+
+    margin-top: 4px;
+    padding: 7px 10px;
+
+    border: 1px solid transparent;
+    border-radius: 8px;
+
+    background: transparent;
+    color: #858da0;
+
+    font-size: 11px;
+    font-weight: 600;
+
+    cursor: pointer;
+
+    transition:
+        background var(--transition),
+        border-color var(--transition),
+        color var(--transition);
+}
+
+.recent-view-all-btn:hover {
+    background: rgba(139, 92, 246, 0.08);
+    border-color: rgba(139, 92, 246, 0.18);
+    color: var(--purple-light);
+}
+
+.recent-view-all-btn:active {
+    transform: translateY(1px);
+}
+
+/* ============================================================
+   DOCUMENTS — ALWAYS A SEPARATE SECTION
+   ============================================================ */
+
+.documents-section {
+    flex: 0 0 auto !important;
+    min-height: 0 !important;
+    margin-top: 10px !important;
+
+    padding-top: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.045);
+}
+
+/* Documents do NOT have their own scrollbar anymore. */
+.sidebar-documents-list {
+    max-height: none !important;
+    height: auto !important;
+    overflow: visible !important;
+}
+
+/* Keep document rows at natural height. */
+.sidebar-document {
+    flex-shrink: 0 !important;
+}
+
+/* ============================================================
+   SIDEBAR BOTTOM / PROFILE
+   ============================================================ */
+
+.sidebar-bottom {
+    flex-shrink: 0 !important;
+}
+
+/* ============================================================
+   SIDEBAR SCROLLBAR
+   ============================================================ */
+
+.sidebar::-webkit-scrollbar {
+    width: 7px !important;
+}
+
+.sidebar::-webkit-scrollbar-track {
+    background: transparent !important;
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+    background: #343a49 !important;
+    border-radius: 10px !important;
+}
+
+.sidebar::-webkit-scrollbar-thumb:hover {
+    background: #4a5161 !important;
+}
+
+/* Mobile drawer keeps the same two-section behavior. */
+@media (max-width: 760px) {
+    .sidebar {
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+    }
+
+    .recent-chats,
+    .sidebar-documents-list {
+        overflow: visible !important;
+        max-height: none !important;
+    }
+}
+
+/* ============================================================
+   END — SIDEBAR FINAL LAYOUT FIX
+   ============================================================ */
+
+
+/* ============================================================
+   FINAL SIDEBAR POLISH — RECENT CHATS + DOCUMENTS
+   ============================================================ */
+
+/* Recent Chats heading must stay on one line. */
+.recent-section .sidebar-section-header {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    flex-wrap: nowrap !important;
+    gap: 12px !important;
+    width: 100% !important;
+}
+
+.recent-section .sidebar-section-title {
+    display: block !important;
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    white-space: nowrap !important;
+    line-height: 1.2 !important;
+}
+
+/* Chat View all stays compact on the same row as the heading. */
+.recent-section .recent-view-all-btn {
+    width: auto !important;
+    min-width: 58px !important;
+    min-height: 28px !important;
+    margin: 0 !important;
+    padding: 4px 2px !important;
+    flex: 0 0 auto !important;
+    border: 0 !important;
+    background: transparent !important;
+    color: #858da0 !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    white-space: nowrap !important;
+}
+
+.recent-section .recent-view-all-btn:hover {
+    background: transparent !important;
+    border-color: transparent !important;
+    color: var(--purple-light) !important;
+}
+
+/* Every chat stays visually compact and strictly one line. */
+.recent-chats .chat-row {
+    min-height: 42px !important;
+    height: 42px !important;
+    flex-shrink: 0 !important;
+}
+
+.recent-chats .chat-item {
+    min-height: 42px !important;
+    height: 42px !important;
+    padding-top: 8px !important;
+    padding-bottom: 8px !important;
+    display: flex !important;
+    align-items: center !important;
+    flex-wrap: nowrap !important;
+    white-space: nowrap !important;
+}
+
+.recent-chats .chat-item-title {
+    display: block !important;
+    min-width: 0 !important;
+    flex: 1 1 auto !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    word-break: normal !important;
+}
+
+.recent-chats .chat-item-icon {
+    flex: 0 0 21px !important;
+}
+
+/* Documents are a separate section; there is NO View all button there. */
+.documents-section #viewAllDocumentsBtn,
+.documents-section .view-all-btn {
+    display: none !important;
+}
+
+.documents-section .sidebar-section-header {
+    justify-content: flex-start !important;
+}
+
+/* Keep document cards compact and independent from recent chats. */
+.documents-section {
+    flex-shrink: 0 !important;
+}
+
+
+/* ============================================================
+   FINAL SIDEBAR FIX — COMPACT CHAT LIST
+   ============================================================ */
+
+/* Keep section title and View all on the SAME LINE. */
+.recent-section .sidebar-section-header {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 12px !important;
+    width: 100% !important;
+    min-height: 32px !important;
+    white-space: nowrap !important;
+}
+
+.recent-section .sidebar-section-title {
+    display: block !important;
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    white-space: nowrap !important;
+    overflow: visible !important;
+}
+
+.recent-section .recent-view-all-btn {
+    display: inline-flex !important;
+    flex: 0 0 auto !important;
+    width: auto !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    padding: 4px 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    white-space: nowrap !important;
+}
+
+/* Each recent chat is ALWAYS a single visual line. */
+.recent-section .chat-row {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+    min-height: 42px;
+}
+
+.recent-section .chat-item {
+    display: flex !important;
+    align-items: center !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 42px !important;
+    white-space: nowrap !important;
+}
+
+.recent-section .chat-item-icon {
+    flex: 0 0 20px !important;
+    width: 20px !important;
+    min-width: 20px !important;
+}
+
+.recent-section .chat-item-title {
+    display: block !important;
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+    white-space: nowrap !important;
+    text-overflow: ellipsis !important;
+    word-break: normal !important;
+}
+
+.recent-section .chat-menu-btn {
+    flex: 0 0 28px !important;
+}
+
+/* Documents: there is NO View all button. */
+.documents-section #viewAllDocumentsBtn,
+.documents-section .view-all-btn {
+    display: none !important;
+}
+
+.documents-section .sidebar-section-header {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+}
+
+.documents-section .sidebar-section-title {
+    white-space: nowrap !important;
+}
+
+/* ============================================================
+   END FINAL SIDEBAR FIX
+   ============================================================ */
+
+
+
+
+
+
+
+   
+
+/* =========================================================
+   COMPOSER POLISH — SLIM CHATGPT-LIKE BAR
+   ---------------------------------------------------------
+   Surgical UI change:
+   - Attach control removed from HTML.
+   - Keep the existing top-right Upload flow untouched.
+   - Make the composer shorter, cleaner and more pill-shaped.
+========================================================= */
+
+.composer-section {
+    padding-top: 5px !important;
+    padding-bottom: 10px !important;
+}
+
+.chat-input-wrapper {
+    min-height: 56px !important;
+    max-height: 160px !important;
+    padding: 7px 8px 7px 15px !important;
+    border-radius: 28px !important;
+}
+
+#questionInput {
+    min-height: 24px !important;
+    padding: 4px 0 !important;
+    font-size: 14px !important;
+    line-height: 1.45 !important;
+}
+
+.composer-bottom {
+    min-height: 34px !important;
+    gap: 6px !important;
+}
+
+/* The remaining model control sits naturally on the right,
+   immediately beside the send button. */
+.composer-tools {
+    margin-left: auto !important;
+    gap: 4px !important;
+}
+
+.model-selector {
+    min-height: 30px !important;
+    padding: 4px 7px !important;
+    border: 0 !important;
+    border-radius: 8px !important;
+    background: transparent !important;
+    font-size: 11px !important;
+}
+
+.gemini-icon {
+    font-size: 14px !important;
+}
+
+.dropdown-arrow {
+    font-size: 10px !important;
+    margin-left: 1px !important;
+}
+
+.send-btn {
+    width: 34px !important;
+    height: 34px !important;
+    min-width: 34px !important;
+    border-radius: 50% !important;
+    font-size: 16px !important;
+}
+
+.composer-hint {
+    padding-top: 3px !important;
+    font-size: 9px !important;
+    opacity: .62 !important;
+}
+
+@media (max-width: 760px) {
+    .chat-input-wrapper {
+        min-height: 52px !important;
+        padding: 6px 7px 6px 13px !important;
+        border-radius: 26px !important;
+    }
+
+    #questionInput {
+        min-height: 22px !important;
+        font-size: 13.5px !important;
+    }
+
+    .send-btn {
+        width: 32px !important;
+        height: 32px !important;
+        min-width: 32px !important;
+        font-size: 15px !important;
+    }
+}
+
+/* ============================================================
+   YOUTUBE SOURCE / VIDEO CONTEXT CARD
+   ============================================================ */
+
+.youtube-source-card {
+    width: min(100%, 760px);
+    margin: 18px auto 10px;
+    padding: 10px;
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 13px;
+    border: 1px solid rgba(255,255,255,.07);
+    border-radius: 15px;
+    background: rgba(17, 19, 27, .82);
+    box-shadow: 0 8px 30px rgba(0,0,0,.14);
+}
+
+.youtube-source-thumbnail {
+    width: 92px;
+    height: 52px;
+    object-fit: cover;
+    border-radius: 9px;
+    background: #11131a;
+}
+
+.youtube-source-info {
+    min-width: 0;
+}
+
+.youtube-source-eyebrow {
+    margin-bottom: 2px;
+    color: #ff6673;
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: .02em;
+    text-transform: uppercase;
+}
+
+.youtube-source-title {
+    overflow: hidden;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.youtube-source-meta {
+    margin-top: 2px;
+    overflow: hidden;
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.youtube-source-watch {
+    padding: 8px 11px;
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 9px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 650;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: all .18s ease;
+}
+
+.youtube-source-watch:hover {
+    border-color: rgba(139,92,246,.35);
+    background: rgba(139,92,246,.08);
+    color: var(--text);
+}
+
+@media (max-width: 760px) {
+    .youtube-source-card {
+        grid-template-columns: 72px minmax(0, 1fr);
+        gap: 10px;
+    }
+
+    .youtube-source-thumbnail {
+        width: 72px;
+        height: 44px;
+    }
+
+    .youtube-source-watch {
+        grid-column: 2;
+        justify-self: start;
+        margin-top: -3px;
+    }
+}
+
+
+/* ============================================================
+   YOUTUBE PLAYER — CONVERSATION PLACEMENT
+   ------------------------------------------------------------
+   The player is moved by app.js directly into the chat stream:
+   source card → player → AI summary → conversation.
+   Keep it centered, large enough to watch comfortably, but never
+   wider than the readable conversation column.
+============================================================ */
+
+.chat-container > .youtube-panel {
+    width: min(100%, 900px) !important;
+    margin: 14px auto 26px !important;
+    padding: 0 !important;
+}
+
+.chat-container > .youtube-panel .youtube-player-container {
+    width: 100% !important;
+    overflow: hidden !important;
+    border-radius: 18px !important;
+    border: 1px solid rgba(255,255,255,.09) !important;
+    background: #000 !important;
+    box-shadow: 0 18px 55px rgba(0,0,0,.28) !important;
+}
+
+.chat-container > .youtube-panel .youtube-player {
+    width: 100% !important;
+    aspect-ratio: 16 / 9 !important;
+    min-height: 0 !important;
+    background: #000 !important;
+}
+
+.chat-container > .youtube-panel .youtube-player iframe {
+    width: 100% !important;
+    height: 100% !important;
+    display: block !important;
+    border: 0 !important;
+}
+
+.chat-container > .youtube-panel .youtube-controls {
+    min-height: 50px !important;
+    padding: 10px 13px !important;
+}
+
+@media (max-width: 760px) {
+    .chat-container > .youtube-panel {
+        width: 100% !important;
+        margin: 12px 0 22px !important;
+    }
+
+    .chat-container > .youtube-panel .youtube-player-container {
+        border-radius: 14px !important;
+    }
+}

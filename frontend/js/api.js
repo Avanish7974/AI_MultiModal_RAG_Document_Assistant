@@ -777,6 +777,77 @@ async function uploadDocument(
 
 
 // =========================================================
+// YOUTUBE MODE STATUS
+// =========================================================
+// Returns whether the current chat already has an analyzed YouTube source.
+
+async function getYouTubeStatus(chatId) {
+
+    if (!chatId) {
+        throw new Error("Chat ID is required.");
+    }
+
+    return await apiRequest(
+        `/api/chats/${encodeURIComponent(chatId)}/youtube/status`,
+        {
+            method: "GET"
+        }
+    );
+}
+
+
+// =========================================================
+// YOUTUBE — INITIAL TRANSCRIPT ANALYSIS + SUMMARY
+// =========================================================
+//
+// Backend:
+// POST /api/chats/{chat_id}/youtube/analyze
+//
+// This runs once when a YouTube URL is added to a chat.
+// The transcript is indexed and a text-based summary becomes the
+// persistent video context used by subsequent questions.
+//
+// =========================================================
+
+async function analyzeYouTubeVideo(
+    chatId,
+    videoUrl
+) {
+
+    if (!chatId) {
+
+        throw new Error(
+            "Chat ID is required."
+        );
+    }
+
+
+    if (
+        !videoUrl ||
+        !videoUrl.trim()
+    ) {
+
+        throw new Error(
+            "YouTube video URL is required."
+        );
+    }
+
+
+    return await apiRequest(
+        `/api/chats/${encodeURIComponent(chatId)}/youtube/analyze`,
+        {
+            method: "POST",
+
+            body: JSON.stringify({
+                video_url:
+                    videoUrl.trim()
+            })
+        }
+    );
+}
+
+
+// =========================================================
 // YOUTUBE LEVEL 2 — MULTIMODAL ASK
 // =========================================================
 //
@@ -900,7 +971,9 @@ window.RAGAPI = {
 
     uploadDocument,
 
-    askYouTubeMultimodal
+    analyzeYouTubeVideo,
+    askYouTubeMultimodal,
+    getYouTubeStatus
 };
 
 
