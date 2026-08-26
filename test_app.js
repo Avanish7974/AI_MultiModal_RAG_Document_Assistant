@@ -27,6 +27,13 @@
 
 let currentAction = "ask";
 
+// Active YouTube URL for the current conversation.
+let currentYouTubeUrl = "";
+
+// The player is temporarily moved into the chat stream. Keep a reference
+// to its original DOM host so chat rerenders do not destroy the player node.
+let youtubePanelHost = null;
+
 let isUploading = false;
 
 let isAsking = false;
@@ -175,11 +182,19 @@ function hideEmptyState() {
 
 function clearChatInterface() {
 
+    currentYouTubeUrl = "";
+
     const container =
         $("chatContainer");
 
 
     if (container) {
+
+        const youtubePanel = $("youtubePanel");
+
+        if (youtubePanelHost && youtubePanel && youtubePanel.parentNode === container) {
+            youtubePanelHost.appendChild(youtubePanel);
+        }
 
         container.innerHTML =
             "";
@@ -221,123 +236,374 @@ function escapeHtml(text) {
 
 function formatAnswer(text) {
 
-    if (text === undefined || text === null) {
+    if (
+        text === undefined ||
+        text === null
+    ) {
+
         return "";
+
     }
 
-    let source = String(text).replace(/\r\n/g, "\n");
 
-    // -----------------------------------------------------
-    // MARKDOWN TABLES
-    // Convert GitHub-style markdown tables into real HTML
-    // tables before applying the remaining markdown rules.
-    // -----------------------------------------------------
-    const tablePlaceholder = [];
+    /*
+     * TABLE FIX — surgical patch
+     *
+     * Keep the original Markdown formatter completely intact.
+     * Only extract Markdown comparison tables before escapeHtml()
+     * so they can be rendered as real HTML tables.
+     */
 
-    source = source.replace(
-        /(^|\n)((?:\|[^\n]*\|\s*\n)(?:\|?\s*:?-+:?\s*\|(?:\s*:?-+:?\s*\|)+\s*\n)(?:\|[^\n]*\|\s*(?:\n|$))+)/gm,
-        (full, prefix, tableText) => {
-            const lines = tableText
-                .trim()
-                .split("\n")
-                .map(line => line.trim())
-                .filter(Boolean);
+    const tableHtml = [];
 
-            if (lines.length < 3) {
-                return full;
+    let source =
+        String(text)
+            .replace(/\r\n/g, "\n")
+            .replace(/\r/g, "\n");
+
+
+    const lines =
+        source.split("\n");
+
+    const outputLines = [];
+
+    let i = 0;
+
+
+    while (
+        i < lines.length
+    ) {
+
+        const header =
+            lines[i];
+
+        const separator =
+            lines[i + 1];
+
+
+        /*
+         * Only treat a block as a table when the SECOND row is
+         * definitely a Markdown separator row. This prevents
+         * normal text, citations, URLs, and other features from
+         * being accidentally changed.
+         */
+
+        if (
+            i + 1 < lines.length &&
+            header.includes("|") &&
+            separator.includes("|")
+        ) {
+
+            const separatorCells =
+                separator
+                    .trim()
+                    .replace(/^\|/, "")
+                    .replace(/\|$/, "")
+                    .split("|")
+                    .map(
+                        cell =>
+                            cell.trim()
+                    );
+
+
+            const isTable =
+                separatorCells.length >= 2 &&
+                separatorCells.every(
+                    cell =>
+                        /^:?-{3,}:?$/.test(
+                            cell
+                        )
+                );
+
+
+            if (
+                isTable
+            ) {
+
+                const splitRow =
+                    row => {
+
+                        let value =
+                            String(row)
+                                .trim();
+
+
+                        if (
+                            value.startsWith("|")
+                        ) {
+
+                            value =
+                                value.slice(1);
+
+                        }
+
+
+                        if (
+                            value.endsWith("|")
+                        ) {
+
+                            value =
+                                value.slice(
+                                    0,
+                                    -1
+                                );
+
+                        }
+
+
+                        return value
+                            .split("|")
+                            .map(
+                                cell =>
+                                    cell.trim()
+                            );
+
+                    };
+
+
+                const headers =
+                    splitRow(header);
+
+                const rows = [];
+
+                let j =
+                    i + 2;
+
+
+                while (
+                    j < lines.length &&
+                    lines[j].includes("|") &&
+                    lines[j].trim()
+                ) {
+
+                    rows.push(
+                        splitRow(
+                            lines[j]
+                        )
+                    );
+
+                    j++;
+
+                }
+
+
+                const cellEscape =
+                    value =>
+                        escapeHtml(
+                            String(
+                                value || ""
+                            )
+                        );
+
+
+                const headerHtml =
+                    headers
+                        .map(
+                            cell =>
+                                `<th>${cellEscape(cell)}</th>`
+                        )
+                        .join("");
+
+
+                const bodyHtml =
+                    rows
+                        .map(
+                            cells => {
+
+                                return `
+                                    <tr>
+                                        ${headers
+                                            .map(
+                                                (_, index) =>
+                                                    `<td>${cellEscape(
+                                                        cells[index] || ""
+                                                    )}</td>`
+                                            )
+                                            .join("")}
+                                    </tr>
+                                `;
+
+                            }
+                        )
+                        .join("");
+
+
+                const token =
+                    `__RAG_COMPARISON_TABLE_${tableHtml.length}__`;
+
+
+                tableHtml.push(
+                    `
+                    <div class="answer-table-wrap">
+                        <table class="answer-table">
+                            <thead>
+                                <tr>${headerHtml}</tr>
+                            </thead>
+                            <tbody>
+                                ${bodyHtml}
+                            </tbody>
+                        </table>
+                    </div>
+                    `
+                );
+
+
+                outputLines.push(
+                    token
+                );
+
+
+                i = j;
+
+                continue;
+
             }
 
-            const splitRow = line => {
-                let row = line.trim();
-                if (row.startsWith("|")) row = row.slice(1);
-                if (row.endsWith("|")) row = row.slice(0, -1);
-                return row.split("|").map(cell => cell.trim());
-            };
-
-            const headers = splitRow(lines[0]);
-            const bodyRows = lines.slice(2).map(splitRow);
-
-            const formatTableCell = value => {
-                let cell = escapeHtml(value ?? "");
-                cell = cell.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
-                cell = cell.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
-                cell = cell.replace(/`([^`]+)`/g, "<code>$1</code>");
-                return cell;
-            };
-
-            const normalizedRows = bodyRows.map(row => {
-                const padded = [...row];
-                while (padded.length < headers.length) padded.push("");
-                return padded.slice(0, headers.length);
-            });
-
-            const tableHtml = `
-                <div class="answer-table-wrap">
-                    <table class="answer-table">
-                        <thead>
-                            <tr>${headers.map(cell => `<th>${formatTableCell(cell)}</th>`).join("")}</tr>
-                        </thead>
-                        <tbody>
-                            ${normalizedRows.map(row => `
-                                <tr>
-                                    ${row.map(cell => `<td>${formatTableCell(cell)}</td>`).join("")}
-                                </tr>
-                            `).join("")}
-                        </tbody>
-                    </table>
-                </div>
-            `;
-
-            const token = `@@RAG_TABLE_${tablePlaceholder.length}@@`;
-            tablePlaceholder.push(tableHtml);
-            return `${prefix}${token}\n`;
         }
-    );
 
-    let html = escapeHtml(source);
+
+        outputLines.push(
+            lines[i]
+        );
+
+        i++;
+
+    }
+
+
+    /*
+     * IMPORTANT:
+     * From this point onward this is the ORIGINAL formatter.
+     * This preserves headings, bold, inline code, bullets,
+     * lists, line breaks, and all other existing behavior.
+     */
+
+    let html =
+        escapeHtml(
+            outputLines.join("\n")
+        );
+
 
     // -----------------------------------------------------
-    // HEADINGS
+    // H3
     // -----------------------------------------------------
-    html = html.replace(/^### (.+)$/gm, "<h3>$1</h3>");
-    html = html.replace(/^## (.+)$/gm, "<h2>$1</h2>");
-    html = html.replace(/^# (.+)$/gm, "<h2>$1</h2>");
+
+    html =
+        html.replace(
+            /^### (.+)$/gm,
+            "<h3>$1</h3>"
+        );
+
 
     // -----------------------------------------------------
-    // BOLD / ITALIC / INLINE CODE
+    // H2
     // -----------------------------------------------------
-    html = html.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
-    html = html.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
-    html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
+
+    html =
+        html.replace(
+            /^## (.+)$/gm,
+            "<h2>$1</h2>"
+        );
+
+
+    // -----------------------------------------------------
+    // H1
+    // -----------------------------------------------------
+
+    html =
+        html.replace(
+            /^# (.+)$/gm,
+            "<h2>$1</h2>"
+        );
+
+
+    // -----------------------------------------------------
+    // BOLD
+    // -----------------------------------------------------
+
+    html =
+        html.replace(
+            /\*\*(.*?)\*\*/g,
+            "<strong>$1</strong>"
+        );
+
+
+    // -----------------------------------------------------
+    // INLINE CODE
+    // -----------------------------------------------------
+
+    html =
+        html.replace(
+            /`([^`]+)`/g,
+            "<code>$1</code>"
+        );
+
 
     // -----------------------------------------------------
     // BULLET POINTS
     // -----------------------------------------------------
-    html = html.replace(/^[•*-] (.+)$/gm, "<li>$1</li>");
-    html = html.replace(/(<li>.*?<\/li>\s*)+/gs, match => `<ul>${match}</ul>`);
+
+    html =
+        html.replace(
+            /^[•*-] (.+)$/gm,
+            "<li>$1</li>"
+        );
+
 
     // -----------------------------------------------------
-    // RESTORE TABLES
+    // GROUP LIST ITEMS
     // -----------------------------------------------------
-    tablePlaceholder.forEach((tableHtml, index) => {
-        const token = `@@RAG_TABLE_${index}@@`;
-        html = html.replace(token, tableHtml);
-    });
+
+    html =
+        html.replace(
+            /(<li>.*?<\/li>\s*)+/gs,
+            match =>
+                `<ul>${match}</ul>`
+        );
+
 
     // -----------------------------------------------------
     // NEW LINES
     // -----------------------------------------------------
-    html = html.replace(/\n/g, "<br>");
 
-    // Avoid excessive <br> immediately around block elements.
-    html = html
-        .replace(/<br>\s*(<h[234]>)/g, "$1")
-        .replace(/(<\/h[234]>)\s*<br>/g, "$1")
-        .replace(/<br>\s*(<div class="answer-table-wrap">)/g, "$1")
-        .replace(/(<\/div>)\s*<br>/g, "$1");
+    html =
+        html.replace(
+            /\n/g,
+            "<br>"
+        );
+
+
+    /*
+     * Restore the real table AFTER all normal Markdown
+     * formatting is finished.
+     */
+
+    tableHtml.forEach(
+        (table, index) => {
+
+            const token =
+                `__RAG_COMPARISON_TABLE_${index}__`;
+
+
+            html =
+                html.replace(
+                    new RegExp(
+                        token,
+                        "g"
+                    ),
+                    table
+                );
+
+        }
+    );
+
 
     return html;
+
 }
+
+
+// =========================================================
 
 // =========================================================
 // SCROLL TO BOTTOM
@@ -527,6 +793,115 @@ function renderMessage(
 
 
 // =========================================================
+// YOUTUBE SOURCE CARD
+// =========================================================
+
+function renderYouTubeSourceCard(
+    videoUrl,
+    ready = true
+) {
+
+    const container = $("chatContainer");
+
+    if (!container || !videoUrl) {
+        return;
+    }
+
+    const videoId =
+        extractYouTubeVideoId(videoUrl);
+
+    if (!videoId) {
+        return;
+    }
+
+    const existing =
+        container.querySelector(".youtube-source-card");
+
+    if (existing) {
+        return;
+    }
+
+    const card =
+        document.createElement("div");
+
+    card.className = "youtube-source-card";
+
+    const thumbnail =
+        document.createElement("img");
+
+    thumbnail.className = "youtube-source-thumbnail";
+    thumbnail.src =
+        `https://img.youtube.com/vi/${encodeURIComponent(videoId)}/hqdefault.jpg`;
+    thumbnail.alt = "YouTube video thumbnail";
+    thumbnail.loading = "lazy";
+
+    const info =
+        document.createElement("div");
+
+    info.className = "youtube-source-info";
+
+    const eyebrow =
+        document.createElement("div");
+
+    eyebrow.className = "youtube-source-eyebrow";
+    eyebrow.textContent = "YouTube video";
+
+    const title =
+        document.createElement("div");
+
+    title.className = "youtube-source-title";
+    title.textContent = "Video analyzed and ready for questions";
+
+    const meta =
+        document.createElement("div");
+
+    meta.className = "youtube-source-meta";
+    meta.textContent = ready
+        ? "Transcript analyzed and summary is available in this chat"
+        : "Analyzing video...";
+
+    info.appendChild(eyebrow);
+    info.appendChild(title);
+    info.appendChild(meta);
+
+    const watch =
+        document.createElement("a");
+
+    watch.className = "youtube-source-watch";
+    watch.href = videoUrl;
+    watch.target = "_blank";
+    watch.rel = "noopener noreferrer";
+    watch.textContent = "Watch ↗";
+
+    card.appendChild(thumbnail);
+    card.appendChild(info);
+    card.appendChild(watch);
+
+    container.appendChild(card);
+}
+
+
+function updateYouTubeSourceCardStatus(ready = true) {
+
+    const card =
+        document.querySelector(".youtube-source-card");
+
+    if (!card) {
+        return;
+    }
+
+    const meta =
+        card.querySelector(".youtube-source-meta");
+
+    if (meta) {
+        meta.textContent = ready
+            ? "Transcript analyzed and summary is available in this chat"
+            : "Analyzing video...";
+    }
+}
+
+
+// =========================================================
 // RENDER ALL MESSAGES
 // =========================================================
 
@@ -545,8 +920,16 @@ function renderMessages(
     }
 
 
+    const youtubePanel = $("youtubePanel");
+
+    if (youtubePanelHost && youtubePanel && youtubePanel.parentNode === container) {
+        youtubePanelHost.appendChild(youtubePanel);
+    }
+
     container.innerHTML =
         "";
+
+    currentYouTubeUrl = "";
 
 
     if (
@@ -564,8 +947,71 @@ function renderMessages(
     hideEmptyState();
 
 
+    // Restore the active YouTube source from persisted chat messages.
+    const youtubeMessage =
+        messages.find(
+            message =>
+                message?.video_url &&
+                extractYouTubeVideoId(message.video_url)
+        );
+
+    if (youtubeMessage) {
+        currentYouTubeUrl =
+            String(youtubeMessage.video_url).trim();
+
+        renderYouTubeSourceCard(
+            currentYouTubeUrl,
+            true
+        );
+
+        // Restore the embedded player immediately below the YouTube
+        // source card and above the conversation/summary.
+        showYouTubeVideo(currentYouTubeUrl, true);
+    }
+
+
     messages.forEach(
         message => {
+
+            // Restore interactive quiz state from persisted chat data.
+            // The backend stores the complete quiz payload so refresh/chat
+            // switching does not destroy the interactive quiz.
+            if (
+                message &&
+                message.mode === "quiz" &&
+                message.quiz &&
+                Array.isArray(message.quiz.questions)
+            ) {
+
+                modeQuizData = message.quiz;
+                modeQuizSubmitted = false;
+
+                renderQuiz(
+                    modeQuizData,
+                    message.sources || []
+                );
+
+                return;
+            }
+
+            // Restore interactive flashcards from persisted chat data.
+            if (
+                message &&
+                message.mode === "flashcards" &&
+                message.flashcards &&
+                Array.isArray(message.flashcards.flashcards)
+            ) {
+
+                modeFlashcardData = message.flashcards;
+                modeFlashcardIndex = 0;
+                modeFlashcardFlipped = false;
+
+                renderFlashcards(
+                    message.sources || []
+                );
+
+                return;
+            }
 
             renderMessage(
                 message.role,
@@ -2210,13 +2656,26 @@ async function sendQuestion() {
         );
 
 
+        const isYouTubeQuestion =
+            Boolean(
+                currentYouTubeUrl &&
+                extractYouTubeVideoId(currentYouTubeUrl)
+            );
+
         setStatus(
-            "Thinking..."
+            isYouTubeQuestion
+                ? "Thinking about the analyzed video..."
+                : "Thinking..."
         );
 
 
-        const response =
-            await askDocuments(
+        const response = isYouTubeQuestion
+            ? await askYouTubeMultimodal(
+                currentChatId,
+                currentYouTubeUrl,
+                submittedQuestion
+            )
+            : await askDocuments(
                 currentChatId,
                 submittedQuestion
             );
@@ -2699,9 +3158,9 @@ function renderSummaryControls() {
 
     controls.innerHTML = `
         <div class="mode-card">
-            <div class="mode-card-title">📄 Summarize Documents</div>
+            <div class="mode-card-title">📝 Summarize Source</div>
             <div class="mode-card-description">
-                Create one combined summary from all documents in this chat.
+                Create a summary from the documents or analyzed YouTube video in this chat.
             </div>
 
             <div class="mode-form-row">
@@ -2715,7 +3174,7 @@ function renderSummaryControls() {
                 </label>
             </div>
 
-            ${modeButton("✨ Summarize All Documents", "summarizeBtn")}
+            ${modeButton("✨ Generate Summary", "summarizeBtn")}
         </div>
     `;
 
@@ -2875,7 +3334,7 @@ function renderQuizControls() {
         <div class="mode-card">
             <div class="mode-card-title">🎯 Generate Quiz</div>
             <div class="mode-card-description">
-                Create a 6-question interactive MCQ quiz from your documents.
+                Create an interactive MCQ quiz from your documents or analyzed YouTube video.
                 Answers stay hidden until you submit.
             </div>
 
@@ -2971,6 +3430,53 @@ function renderFlashcardControls() {
 
 
 // =========================================================
+// YOUTUBE CONTEXT HELPER
+// =========================================================
+// A chat may contain either uploaded documents or an analyzed
+// YouTube transcript.  The AI modes should work with both.
+
+function hasYouTubeContext() {
+    return Boolean(
+        currentYouTubeUrl &&
+        extractYouTubeVideoId(currentYouTubeUrl)
+    );
+}
+
+async function getModeSourceState() {
+    const documents = await refreshCurrentChatDocuments();
+
+    let youtube = {
+        analyzed: false,
+        video_url: null,
+        video_id: null
+    };
+
+    // Do not rely only on frontend state. The backend is the source of truth
+    // when a chat is reopened or when the page was refreshed.
+    if (currentChatId && typeof getYouTubeStatus === "function") {
+        try {
+            const response = await getYouTubeStatus(currentChatId);
+            if (response?.analyzed) {
+                youtube = response;
+                if (response.video_url) {
+                    currentYouTubeUrl = String(response.video_url).trim();
+                }
+            }
+        } catch (error) {
+            console.warn("Could not read YouTube mode status:", error);
+        }
+    }
+
+    return {
+        documents,
+        youtube,
+        hasYoutube: Boolean(youtube.analyzed && youtube.video_url),
+        hasSource: Boolean(documents.length) || Boolean(youtube.analyzed && youtube.video_url)
+    };
+}
+
+
+// =========================================================
 // SUMMARY
 // =========================================================
 
@@ -2986,21 +3492,17 @@ async function runSummary() {
 
         await ensureCurrentChat();
 
-        const documents =
-            await refreshCurrentChatDocuments();
-
-        if (!documents.length) {
-            throw new Error(
-                "Please upload at least one document first."
-            );
-        }
+        const sourceState = await getModeSourceState();
+        const documents = sourceState.documents;
 
         const length =
             document.getElementById("summaryLength")?.value ||
             "Medium";
 
         setStatus(
-            "📝 Reading documents and generating summary..."
+            sourceState.hasYoutube && !documents.length
+                ? "📝 Reading the video transcript and generating summary..."
+                : "📝 Reading the available source and generating summary..."
         );
 
         const response =
@@ -3146,14 +3648,8 @@ async function runQuiz() {
 
         await ensureCurrentChat();
 
-        const documents =
-            await refreshCurrentChatDocuments();
-
-        if (!documents.length) {
-            throw new Error(
-                "Please upload at least one document first."
-            );
-        }
+        const sourceState = await getModeSourceState();
+        const documents = sourceState.documents;
 
         const count = Math.min(
             10,
@@ -3169,7 +3665,9 @@ async function runQuiz() {
             "Medium";
 
         setStatus(
-            `🎯 Reading your documents and generating ${count}-question quiz...`
+            sourceState.hasYoutube && !documents.length
+                ? `🎯 Reading the video transcript and generating ${count}-question quiz...`
+                : `🎯 Reading the available source and generating ${count}-question quiz...`
         );
 
         const response =
@@ -3520,14 +4018,8 @@ async function runFlashcards() {
 
         await ensureCurrentChat();
 
-        const documents =
-            await refreshCurrentChatDocuments();
-
-        if (!documents.length) {
-            throw new Error(
-                "Please upload at least one document first."
-            );
-        }
+        const sourceState = await getModeSourceState();
+        const documents = sourceState.documents;
 
         const count = Math.min(
             10,
@@ -3543,7 +4035,11 @@ async function runFlashcards() {
             document.getElementById("flashcardDifficulty")?.value ||
             "Medium";
 
-        setStatus("📑 Creating interactive flashcards...");
+        setStatus(
+            sourceState.hasYoutube && !documents.length
+                ? "📑 Creating flashcards from the video transcript..."
+                : "📑 Creating interactive flashcards..."
+        );
 
         const response =
             await generateDocumentFlashcards(
@@ -3860,9 +4356,22 @@ function initializeActionButtons() {
                 return;
             }
 
-            // YouTube remains handled by the existing YouTube controls.
+            // YouTube mode opens the existing YouTube workflow.
             if (currentAction === "youtube") {
-                setStatus("");
+                const uploadPanel = $("uploadPanel");
+                const youtubeInput = $("youtubeUrl");
+
+                if (uploadPanel) {
+                    uploadPanel.classList.add("open");
+                }
+
+                if (youtubeInput) {
+                    window.setTimeout(() => youtubeInput.focus(), 0);
+                }
+
+                setStatus(
+                    "Paste a YouTube URL to start video analysis."
+                );
             }
         });
     });
@@ -3976,61 +4485,55 @@ function extractYouTubeVideoId(
 // =========================================================
 
 function showYouTubeVideo(
-    url
+    url,
+    silent = false
 ) {
 
-    const panel =
-        $("youtubePanel");
+    const panel = $("youtubePanel");
+    const iframe = $("youtubePlayer");
+    const container = $("chatContainer");
 
-    const iframe =
-        $("youtubePlayer");
-
-
-    if (
-        !panel ||
-        !iframe
-    ) {
-
+    if (!panel || !iframe || !container) {
         return;
-
     }
 
+    if (!youtubePanelHost) {
+        youtubePanelHost = panel.parentNode;
+    }
 
-    const videoId =
-        extractYouTubeVideoId(
-            url
-        );
-
+    const videoId = extractYouTubeVideoId(url);
 
     if (!videoId) {
-
-        setStatus(
-            "Please enter a valid YouTube URL.",
-            true
-        );
-
+        if (!silent) {
+            setStatus(
+                "Please enter a valid YouTube URL.",
+                true
+            );
+        }
         return;
-
     }
 
-
+    // The player belongs directly to the conversation stream. This gives
+    // us the clean order:
+    // YouTube source card → video player → AI summary → chat.
     iframe.src =
-        `https://www.youtube.com/embed/${videoId}?enablejsapi=1`;
+        `https://www.youtube-nocookie.com/embed/${videoId}?enablejsapi=1&rel=0`;
 
+    panel.classList.remove("hidden");
+    panel.style.display = "block";
 
-    panel.classList.remove(
-        "hidden"
-    );
+    const sourceCard =
+        container.querySelector(".youtube-source-card");
 
+    if (sourceCard) {
+        sourceCard.insertAdjacentElement("afterend", panel);
+    } else {
+        container.insertBefore(panel, container.firstChild);
+    }
 
-    panel.style.display =
-        "block";
-
-
-    setStatus(
-        "YouTube video loaded."
-    );
-
+    if (!silent) {
+        setStatus("YouTube video loaded.");
+    }
 }
 
 
@@ -4039,6 +4542,8 @@ function showYouTubeVideo(
 // =========================================================
 
 function hideYouTubeVideo() {
+
+    currentYouTubeUrl = "";
 
     const panel =
         $("youtubePanel");
@@ -4064,6 +4569,10 @@ function hideYouTubeVideo() {
 
         panel.style.display =
             "none";
+
+        if (youtubePanelHost && panel.parentNode !== youtubePanelHost) {
+            youtubePanelHost.appendChild(panel);
+        }
 
     }
 
@@ -4143,41 +4652,112 @@ function initializeYouTubeUI() {
                 }
 
 
+                if (isAsking || isRunningAction) {
+                    return;
+                }
+
                 try {
 
                     await ensureCurrentChat();
 
+                    if (!currentChatId) {
+                        throw new Error(
+                            "No active chat available."
+                        );
+                    }
 
-                    showYouTubeVideo(
-                        url
+                    currentAction = "youtube";
+                    currentYouTubeUrl = url;
+
+                    const uploadPanel = $("uploadPanel");
+                    if (uploadPanel) {
+                        uploadPanel.classList.remove("open");
+                    }
+
+                    hideEmptyState();
+
+                    // Keep the conversation focused on the AI summary.
+                    // The video itself is available from the compact source card.
+
+                    // Analyze the video exactly once. The backend stores the
+                    // resulting summary as persistent video context for this chat.
+                    setStatus(
+                        "Extracting transcript and generating a video summary..."
                     );
 
+                    isAsking = true;
+                    analyzeBtn.disabled = true;
 
-                    // -------------------------------------------------
-                    // YouTube UI currently loads the video.
-                    //
-                    // Actual multimodal question is sent through
-                    // askYouTubeMultimodal().
-                    // -------------------------------------------------
+                    renderYouTubeSourceCard(
+                        currentYouTubeUrl,
+                        false
+                    );
+
+                    // Show the real YouTube player immediately. The user can
+                    // watch while transcript analysis is running.
+                    showYouTubeVideo(
+                        currentYouTubeUrl,
+                        true
+                    );
+
+                    const response =
+                        await analyzeYouTubeVideo(
+                            currentChatId,
+                            currentYouTubeUrl
+                        );
+
+                    const answer =
+                        getResponseAnswer(
+                            response,
+                            "No YouTube summary returned."
+                        );
+
+                    renderMessage(
+                        "assistant",
+                        answer
+                    );
+
+                    updateYouTubeSourceCardStatus(true);
+
+                    const questionInput = $("questionInput");
+                    if (questionInput) {
+                        questionInput.placeholder = "Ask anything about this video...";
+                    }
+
+                    if (typeof loadChats === "function") {
+                        try {
+                            await loadChats();
+                        } catch (loadError) {
+                            console.warn(
+                                "Could not refresh chats after YouTube analysis:",
+                                loadError
+                            );
+                        }
+                    }
 
                     setStatus(
-                        "YouTube video loaded."
+                        "YouTube summary ready. You can now ask questions."
                     );
-
 
                 } catch (error) {
 
                     console.error(
-                        "YouTube initialization failed:",
+                        "YouTube analysis failed:",
                         error
                     );
 
+                    hideYouTubeVideo();
 
                     setStatus(
                         error.message ||
-                        "Could not load YouTube video.",
+                        "Could not analyze YouTube video.",
                         true
                     );
+
+                } finally {
+
+                    isAsking = false;
+                    analyzeBtn.disabled = false;
 
                 }
 
@@ -4796,6 +5376,8 @@ window.RAGApp = {
     refreshCurrentChatDocuments,
 
     extractYouTubeVideoId,
+    renderYouTubeSourceCard,
+    updateYouTubeSourceCardStatus,
 
     showYouTubeVideo,
 

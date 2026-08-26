@@ -482,30 +482,34 @@ async function handleNewChat() {
     try {
 
         setStatus(
-            "Creating new chat..."
+            "Starting new chat..."
         );
 
 
-        const data =
-            await createChat();
-
-
-        if (!data?.chat_id && !data?.id) {
-
-            throw new Error(
-                "Server did not return a chat ID."
-            );
-        }
-
+        // =====================================================
+        // IMPORTANT: DO NOT CREATE A DATABASE CHAT HERE
+        // =====================================================
+        //
+        // A new chat is only persisted when the user actually
+        // sends a question, uploads a document, or performs
+        // another chat action that calls ensureCurrentChat().
+        //
+        // Creating a chat here used to produce an empty "New Chat"
+        // immediately. Then another part of the application could
+        // create a second chat when the first real action happened.
+        //
+        // Keep this state-only: currentChatId = null.
+        // =====================================================
 
         currentChatId =
-            data.chat_id ||
-            data.id;
-
+            null;
 
         saveCurrentChatId(
-            currentChatId
+            null
         );
+
+        recentChatsExpanded =
+            false;
 
 
         // =====================================================
@@ -534,18 +538,12 @@ async function handleNewChat() {
         // CLEAR DOCUMENT LIBRARY
         // =====================================================
 
-        try {
+        if (
+            typeof window !== "undefined"
+        ) {
 
-            localStorage.removeItem(
-                `rag_documents_${currentChatId}`
-            );
-
-        } catch (error) {
-
-            console.warn(
-                "Could not clear document cache:",
-                error
-            );
+            window.currentChatDocuments =
+                [];
         }
 
 
@@ -559,30 +557,30 @@ async function handleNewChat() {
 
 
         // =====================================================
-        // REFRESH SIDEBAR
+        // REFRESH SIDEBAR WITHOUT ADDING A NEW CHAT
         // =====================================================
 
         await loadChats();
 
         updateActiveChatStyles();
 
-        setStatus("");
-
+        setStatus(
+            ""
+        );
 
     } catch (error) {
 
         console.error(
-            "Could not create chat:",
+            "Could not start new chat:",
             error
         );
 
         setStatus(
-            `Could not create chat: ${error.message}`,
+            `Could not start new chat: ${error.message}`,
             true
         );
     }
 }
-
 
 // =========================================================
 // SELECT / OPEN CHAT
@@ -603,6 +601,53 @@ async function selectChat(chatId) {
         setStatus(
             "Loading chat..."
         );
+
+
+        // =====================================================
+        // CLEAR PREVIOUS CHAT'S YOUTUBE PLAYER IMMEDIATELY
+        // =====================================================
+        //
+        // Do this BEFORE any await/getChat/getChatMessages calls.
+        // Otherwise the previous chat's YouTube iframe remains visible
+        // while the new chat is loading.
+        //
+        // Do not rely only on clearChatInterface(): that function clears
+        // the conversation container, but the YouTube panel is a separate
+        // DOM node which can be temporarily mounted inside the chat stream.
+        // =====================================================
+
+        if (
+            typeof hideYouTubeVideo ===
+            "function"
+        ) {
+
+            hideYouTubeVideo();
+
+        } else {
+
+            const youtubePanel =
+                document.getElementById(
+                    "youtubePanel"
+                );
+
+            const youtubePlayer =
+                document.getElementById(
+                    "youtubePlayer"
+                );
+
+            if (youtubePlayer) {
+                youtubePlayer.src = "";
+            }
+
+            if (youtubePanel) {
+                youtubePanel.classList.add(
+                    "hidden"
+                );
+
+                youtubePanel.style.display =
+                    "none";
+            }
+        }
 
 
         // =====================================================
@@ -693,6 +738,42 @@ async function selectChat(chatId) {
         // =====================================================
         // CLEAR CURRENT UI
         // =====================================================
+
+        // Final guard: make absolutely sure the previous chat's
+        // YouTube player is gone before the new chat is rendered.
+        if (
+            typeof hideYouTubeVideo ===
+            "function"
+        ) {
+
+            hideYouTubeVideo();
+
+        } else {
+
+            const youtubePanel =
+                document.getElementById(
+                    "youtubePanel"
+                );
+
+            const youtubePlayer =
+                document.getElementById(
+                    "youtubePlayer"
+                );
+
+            if (youtubePlayer) {
+                youtubePlayer.src = "";
+            }
+
+            if (youtubePanel) {
+                youtubePanel.classList.add(
+                    "hidden"
+                );
+
+                youtubePanel.style.display =
+                    "none";
+            }
+        }
+
 
         if (
             typeof clearChatInterface ===
