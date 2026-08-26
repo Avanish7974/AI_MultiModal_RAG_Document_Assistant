@@ -8,18 +8,15 @@
 // API functions are provided by api.js
 // Chat state/functions are provided by chats.js
 //
-// DO NOT declare:
+// This file connects:
 //
-// API_BASE_URL
-// currentChatId
-// createChat
-// getChats
-// uploadDocument
-// askDocuments
-// saveChatMessage
-// loadChats
-// getChat
-// selectChat
+// 💬 Ask Documents
+// 📄 Summarize
+// 🔄 Compare Documents
+// 🎯 Generate Quiz
+// 📑 Flashcards
+// 📁 Upload Documents
+// 🎥 YouTube Multimodal
 //
 // =========================================================
 
@@ -34,6 +31,8 @@ let isUploading = false;
 
 let isAsking = false;
 
+let isRunningAction = false;
+
 
 // =========================================================
 // DOM HELPER
@@ -42,6 +41,7 @@ let isAsking = false;
 function $(id) {
 
     return document.getElementById(id);
+
 }
 
 
@@ -49,39 +49,85 @@ function $(id) {
 // STATUS MESSAGE
 // =========================================================
 
-function setStatus(
-    message,
-    isError = false
-) {
 
-    const status =
-        $("statusMessage");
+// =========================================================
+// STATUS MESSAGE / AI PROCESSING INDICATOR
+// =========================================================
+// =========================================================
+// STATUS MESSAGE / CHATGPT-STYLE PROCESSING
+// =========================================================
 
+function setStatus(message, isError = false) {
+    const status = $("statusMessage");
+    const chatContainer = $("chatContainer");
+    const text = message || "";
 
-    if (!status) {
+    // The status area is intentionally kept out of the top-right corner.
+    // Every upload / processing / error state belongs to the conversation.
+    const oldProcessing = document.querySelectorAll(
+        ".rag-processing-status, .rag-inline-status"
+    );
+    oldProcessing.forEach(el => el.remove());
 
-        if (message) {
-            console.log(message);
-        }
+    if (status) {
+        status.textContent = "";
+        status.style.display = "none";
+        status.classList.remove("error", "processing");
+    }
 
+    document.body.classList.remove("rag-processing");
+
+    if (!text || !chatContainer) {
         return;
     }
 
+    const userMessages = chatContainer.querySelectorAll(".message.user");
+    const latestUserMessage = userMessages[userMessages.length - 1];
 
-    status.textContent =
-        message || "";
-
-
-    status.classList.toggle(
-        "error",
-        Boolean(isError)
+    const lower = text.toLowerCase();
+    const isProcessing = !isError && (
+        /thinking|analyzing|processing|generating|reading|searching|uploading|upload|comparing|summarizing|creating/.test(lower)
     );
 
+    const row = document.createElement("div");
+    row.className = isError
+        ? "rag-inline-status rag-inline-status-error"
+        : isProcessing
+            ? "rag-processing-status"
+            : "rag-inline-status";
 
-    status.style.display =
-        message
-            ? "block"
-            : "none";
+    if (isProcessing) {
+        row.innerHTML = `
+            <span class="processing-dot" aria-hidden="true"></span>
+            <span class="processing-text">${escapeHtml(text)}</span>
+            <span class="processing-dots" aria-hidden="true">•••</span>
+        `;
+        document.body.classList.add("rag-processing");
+    } else {
+        row.innerHTML = `
+            <span class="inline-status-icon" aria-hidden="true">${isError ? "⚠" : "✓"}</span>
+            <span class="inline-status-text">${escapeHtml(text)}</span>
+        `;
+    }
+
+    // Put every state immediately after the latest user message when one
+    // exists. Otherwise it stays at the end of the conversation stream.
+    if (latestUserMessage) {
+        latestUserMessage.insertAdjacentElement("afterend", row);
+    } else {
+        chatContainer.appendChild(row);
+    }
+
+    scrollToBottom();
+
+    // Success/info messages are temporary, but errors stay until the next
+    // state/result replaces them so the user can actually read the error.
+    if (!isProcessing && !isError) {
+        window.setTimeout(() => {
+            row.classList.add("is-hiding");
+            window.setTimeout(() => row.remove(), 220);
+        }, 4200);
+    }
 }
 
 
@@ -100,7 +146,9 @@ function showEmptyState() {
         emptyState.classList.remove(
             "hidden"
         );
+
     }
+
 }
 
 
@@ -115,7 +163,9 @@ function hideEmptyState() {
         emptyState.classList.add(
             "hidden"
         );
+
     }
+
 }
 
 
@@ -131,13 +181,16 @@ function clearChatInterface() {
 
     if (container) {
 
-        container.innerHTML = "";
+        container.innerHTML =
+            "";
+
     }
 
 
     hideSources();
 
     showEmptyState();
+
 }
 
 
@@ -158,6 +211,7 @@ function escapeHtml(text) {
 
 
     return div.innerHTML;
+
 }
 
 
@@ -167,107 +221,123 @@ function escapeHtml(text) {
 
 function formatAnswer(text) {
 
-    if (!text) {
+    if (text === undefined || text === null) {
         return "";
     }
 
+    let source = String(text).replace(/\r\n/g, "\n");
 
-    let html =
-        escapeHtml(text);
+    // -----------------------------------------------------
+    // MARKDOWN TABLES
+    // Convert GitHub-style markdown tables into real HTML
+    // tables before applying the remaining markdown rules.
+    // -----------------------------------------------------
+    const tablePlaceholder = [];
 
+    source = source.replace(
+        /(^|\n)((?:\|[^\n]*\|\s*\n)(?:\|?\s*:?-+:?\s*\|(?:\s*:?-+:?\s*\|)+\s*\n)(?:\|[^\n]*\|\s*(?:\n|$))+)/gm,
+        (full, prefix, tableText) => {
+            const lines = tableText
+                .trim()
+                .split("\n")
+                .map(line => line.trim())
+                .filter(Boolean);
 
-    // =====================================================
-    // H3
-    // =====================================================
+            if (lines.length < 3) {
+                return full;
+            }
 
-    html =
-        html.replace(
-            /^### (.+)$/gm,
-            "<h3>$1</h3>"
-        );
+            const splitRow = line => {
+                let row = line.trim();
+                if (row.startsWith("|")) row = row.slice(1);
+                if (row.endsWith("|")) row = row.slice(0, -1);
+                return row.split("|").map(cell => cell.trim());
+            };
 
+            const headers = splitRow(lines[0]);
+            const bodyRows = lines.slice(2).map(splitRow);
 
-    // =====================================================
-    // H2
-    // =====================================================
+            const formatTableCell = value => {
+                let cell = escapeHtml(value ?? "");
+                cell = cell.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+                cell = cell.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+                cell = cell.replace(/`([^`]+)`/g, "<code>$1</code>");
+                return cell;
+            };
 
-    html =
-        html.replace(
-            /^## (.+)$/gm,
-            "<h2>$1</h2>"
-        );
+            const normalizedRows = bodyRows.map(row => {
+                const padded = [...row];
+                while (padded.length < headers.length) padded.push("");
+                return padded.slice(0, headers.length);
+            });
 
+            const tableHtml = `
+                <div class="answer-table-wrap">
+                    <table class="answer-table">
+                        <thead>
+                            <tr>${headers.map(cell => `<th>${formatTableCell(cell)}</th>`).join("")}</tr>
+                        </thead>
+                        <tbody>
+                            ${normalizedRows.map(row => `
+                                <tr>
+                                    ${row.map(cell => `<td>${formatTableCell(cell)}</td>`).join("")}
+                                </tr>
+                            `).join("")}
+                        </tbody>
+                    </table>
+                </div>
+            `;
 
-    // =====================================================
-    // H1
-    // =====================================================
+            const token = `@@RAG_TABLE_${tablePlaceholder.length}@@`;
+            tablePlaceholder.push(tableHtml);
+            return `${prefix}${token}\n`;
+        }
+    );
 
-    html =
-        html.replace(
-            /^# (.+)$/gm,
-            "<h2>$1</h2>"
-        );
+    let html = escapeHtml(source);
 
+    // -----------------------------------------------------
+    // HEADINGS
+    // -----------------------------------------------------
+    html = html.replace(/^### (.+)$/gm, "<h3>$1</h3>");
+    html = html.replace(/^## (.+)$/gm, "<h2>$1</h2>");
+    html = html.replace(/^# (.+)$/gm, "<h2>$1</h2>");
 
-    // =====================================================
-    // BOLD
-    // =====================================================
+    // -----------------------------------------------------
+    // BOLD / ITALIC / INLINE CODE
+    // -----------------------------------------------------
+    html = html.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+    html = html.replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+    html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
 
-    html =
-        html.replace(
-            /\*\*(.*?)\*\*/g,
-            "<strong>$1</strong>"
-        );
-
-
-    // =====================================================
-    // INLINE CODE
-    // =====================================================
-
-    html =
-        html.replace(
-            /`([^`]+)`/g,
-            "<code>$1</code>"
-        );
-
-
-    // =====================================================
+    // -----------------------------------------------------
     // BULLET POINTS
-    // =====================================================
+    // -----------------------------------------------------
+    html = html.replace(/^[•*-] (.+)$/gm, "<li>$1</li>");
+    html = html.replace(/(<li>.*?<\/li>\s*)+/gs, match => `<ul>${match}</ul>`);
 
-    html =
-        html.replace(
-            /^[•*-] (.+)$/gm,
-            "<li>$1</li>"
-        );
+    // -----------------------------------------------------
+    // RESTORE TABLES
+    // -----------------------------------------------------
+    tablePlaceholder.forEach((tableHtml, index) => {
+        const token = `@@RAG_TABLE_${index}@@`;
+        html = html.replace(token, tableHtml);
+    });
 
-
-    // =====================================================
-    // GROUP LIST ITEMS
-    // =====================================================
-
-    html =
-        html.replace(
-            /(<li>.*?<\/li>\s*)+/gs,
-            match =>
-                `<ul>${match}</ul>`
-        );
-
-
-    // =====================================================
+    // -----------------------------------------------------
     // NEW LINES
-    // =====================================================
+    // -----------------------------------------------------
+    html = html.replace(/\n/g, "<br>");
 
-    html =
-        html.replace(
-            /\n/g,
-            "<br>"
-        );
-
+    // Avoid excessive <br> immediately around block elements.
+    html = html
+        .replace(/<br>\s*(<h[234]>)/g, "$1")
+        .replace(/(<\/h[234]>)\s*<br>/g, "$1")
+        .replace(/<br>\s*(<div class="answer-table-wrap">)/g, "$1")
+        .replace(/(<\/div>)\s*<br>/g, "$1");
 
     return html;
 }
-
 
 // =========================================================
 // SCROLL TO BOTTOM
@@ -282,22 +352,28 @@ function scrollToBottom() {
 
 
     if (!main) {
+
         return;
+
     }
 
 
-    requestAnimationFrame(() => {
+    requestAnimationFrame(
+        () => {
 
-        main.scrollTo({
+            main.scrollTo({
 
-            top:
-                main.scrollHeight,
+                top:
+                    main.scrollHeight,
 
-            behavior:
-                "smooth"
-        });
+                behavior:
+                    "smooth"
 
-    });
+            });
+
+        }
+    );
+
 }
 
 
@@ -321,6 +397,7 @@ function renderMessage(
         );
 
         return;
+
     }
 
 
@@ -341,9 +418,9 @@ function renderMessage(
         }`;
 
 
-    // =====================================================
+    // -----------------------------------------------------
     // HEADER
-    // =====================================================
+    // -----------------------------------------------------
 
     const header =
         document.createElement(
@@ -387,14 +464,15 @@ function renderMessage(
         icon
     );
 
+
     header.appendChild(
         name
     );
 
 
-    // =====================================================
+    // -----------------------------------------------------
     // CONTENT
-    // =====================================================
+    // -----------------------------------------------------
 
     const contentElement =
         document.createElement(
@@ -424,6 +502,7 @@ function renderMessage(
 
         contentElement.textContent =
             content || "";
+
     }
 
 
@@ -443,6 +522,7 @@ function renderMessage(
 
 
     scrollToBottom();
+
 }
 
 
@@ -459,7 +539,9 @@ function renderMessages(
 
 
     if (!container) {
+
         return;
+
     }
 
 
@@ -475,6 +557,7 @@ function renderMessages(
         showEmptyState();
 
         return;
+
     }
 
 
@@ -494,6 +577,7 @@ function renderMessages(
 
 
     scrollToBottom();
+
 }
 
 
@@ -515,6 +599,7 @@ function hideSources() {
         section.classList.add(
             "hidden"
         );
+
     }
 
 
@@ -522,7 +607,9 @@ function hideSources() {
 
         container.innerHTML =
             "";
+
     }
+
 }
 
 
@@ -547,6 +634,7 @@ function renderSources(
     ) {
 
         return;
+
     }
 
 
@@ -564,6 +652,7 @@ function renderSources(
         );
 
         return;
+
     }
 
 
@@ -622,6 +711,7 @@ function renderSources(
                 parts.push(
                     `Page ${source.page}`
                 );
+
             }
 
 
@@ -632,6 +722,7 @@ function renderSources(
                 parts.push(
                     source.source_type
                 );
+
             }
 
 
@@ -653,6 +744,7 @@ function renderSources(
                 card.appendChild(
                     location
                 );
+
             }
 
 
@@ -662,6 +754,7 @@ function renderSources(
 
         }
     );
+
 }
 
 
@@ -674,6 +767,7 @@ function getChatDocumentsKey(
 ) {
 
     return `rag_documents_${chatId}`;
+
 }
 
 
@@ -682,7 +776,9 @@ function getChatDocuments(
 ) {
 
     if (!chatId) {
+
         return [];
+
     }
 
 
@@ -697,7 +793,9 @@ function getChatDocuments(
 
 
         if (!stored) {
+
             return [];
+
         }
 
 
@@ -714,6 +812,7 @@ function getChatDocuments(
         ) {
 
             return [];
+
         }
 
 
@@ -729,7 +828,9 @@ function getChatDocuments(
 
 
         return [];
+
     }
+
 }
 
 
@@ -743,23 +844,31 @@ function saveChatDocuments(
 ) {
 
     if (!chatId) {
+
         return;
+
     }
 
 
     try {
 
         localStorage.setItem(
+
             getChatDocumentsKey(
                 chatId
             ),
+
             JSON.stringify(
-                Array.isArray(documents)
+
+                Array.isArray(
+                    documents
+                )
                     ? documents
                     : []
-            )
-        );
 
+            )
+
+        );
 
     } catch (error) {
 
@@ -767,7 +876,9 @@ function saveChatDocuments(
             "Could not save chat documents:",
             error
         );
+
     }
+
 }
 
 
@@ -788,6 +899,7 @@ function formatFileSize(
     ) {
 
         return "";
+
     }
 
 
@@ -800,6 +912,7 @@ function formatFileSize(
     ) {
 
         return `${size} B`;
+
     }
 
 
@@ -810,6 +923,7 @@ function formatFileSize(
         return `${(
             size / 1024
         ).toFixed(1)} KB`;
+
     }
 
 
@@ -821,6 +935,7 @@ function formatFileSize(
             size /
             (1024 * 1024)
         ).toFixed(1)} MB`;
+
     }
 
 
@@ -828,6 +943,7 @@ function formatFileSize(
         size /
         (1024 * 1024 * 1024)
     ).toFixed(1)} GB`;
+
 }
 
 
@@ -853,6 +969,7 @@ function getDocumentIcon(
     ) {
 
         return "📕";
+
     }
 
 
@@ -862,6 +979,7 @@ function getDocumentIcon(
     ) {
 
         return "📘";
+
     }
 
 
@@ -871,6 +989,7 @@ function getDocumentIcon(
     ) {
 
         return "📙";
+
     }
 
 
@@ -881,6 +1000,7 @@ function getDocumentIcon(
     ) {
 
         return "📊";
+
     }
 
 
@@ -891,6 +1011,7 @@ function getDocumentIcon(
     ) {
 
         return "🖼️";
+
     }
 
 
@@ -899,10 +1020,12 @@ function getDocumentIcon(
     ) {
 
         return "📄";
+
     }
 
 
     return "📁";
+
 }
 
 
@@ -966,7 +1089,9 @@ function normalizeDocumentForUI(
             doc?.uploaded_at ||
             doc?.created_at ||
             new Date().toISOString()
+
     };
+
 }
 
 
@@ -991,15 +1116,10 @@ function renderDocumentLibrary() {
         !documentList
     ) {
 
-        console.warn(
-            "Document library elements not found."
-        );
-
         return;
+
     }
 
-
-    // currentChatId belongs to chats.js.
 
     if (
         typeof currentChatId ===
@@ -1013,15 +1133,15 @@ function renderDocumentLibrary() {
         documentList.innerHTML =
             "";
 
-
         if (countElement) {
 
             countElement.textContent =
                 "0 documents";
+
         }
 
-
         return;
+
     }
 
 
@@ -1041,6 +1161,7 @@ function renderDocumentLibrary() {
             documents.length === 1
                 ? "1 document"
                 : `${documents.length} documents`;
+
     }
 
 
@@ -1052,6 +1173,7 @@ function renderDocumentLibrary() {
             "none";
 
         return;
+
     }
 
 
@@ -1097,10 +1219,6 @@ function renderDocumentLibrary() {
                 "rgba(255,255,255,0.04)";
 
 
-            // =================================================
-            // ICON
-            // =================================================
-
             const icon =
                 document.createElement(
                     "div"
@@ -1117,10 +1235,6 @@ function renderDocumentLibrary() {
             icon.style.fontSize =
                 "28px";
 
-
-            // =================================================
-            // INFO
-            // =================================================
 
             const info =
                 document.createElement(
@@ -1175,6 +1289,7 @@ function renderDocumentLibrary() {
                 parts.push(
                     doc.file_type
                 );
+
             }
 
 
@@ -1191,12 +1306,16 @@ function renderDocumentLibrary() {
                     );
 
 
-                if (formattedSize) {
+                if (
+                    formattedSize
+                ) {
 
                     parts.push(
                         formattedSize
                     );
+
                 }
+
             }
 
 
@@ -1211,6 +1330,7 @@ function renderDocumentLibrary() {
                 parts.push(
                     `${doc.chunks} chunks`
                 );
+
             }
 
 
@@ -1238,10 +1358,6 @@ function renderDocumentLibrary() {
                 meta
             );
 
-
-            // =================================================
-            // STATUS
-            // =================================================
 
             const status =
                 document.createElement(
@@ -1291,6 +1407,7 @@ function renderDocumentLibrary() {
 
         }
     );
+
 }
 
 
@@ -1309,6 +1426,7 @@ async function refreshCurrentChatDocuments() {
         renderDocumentLibrary();
 
         return [];
+
     }
 
 
@@ -1353,6 +1471,7 @@ async function refreshCurrentChatDocuments() {
 
             files =
                 response.documents;
+
         }
 
 
@@ -1364,8 +1483,6 @@ async function refreshCurrentChatDocuments() {
                     )
             );
 
-
-        // Backend is source of truth.
 
         saveChatDocuments(
             currentChatId,
@@ -1393,16 +1510,15 @@ async function refreshCurrentChatDocuments() {
         );
 
 
-        // Keep cached documents if backend
-        // temporarily fails.
-
         renderDocumentLibrary();
 
 
         return getChatDocuments(
             currentChatId
         );
+
     }
+
 }
 
 
@@ -1426,6 +1542,7 @@ function addUploadedDocument(
         );
 
         return;
+
     }
 
 
@@ -1464,6 +1581,7 @@ function addUploadedDocument(
         documents.push(
             documentData
         );
+
     }
 
 
@@ -1474,6 +1592,7 @@ function addUploadedDocument(
 
 
     renderDocumentLibrary();
+
 }
 
 
@@ -1490,6 +1609,7 @@ async function ensureCurrentChat() {
     ) {
 
         return currentChatId;
+
     }
 
 
@@ -1510,15 +1630,13 @@ async function ensureCurrentChat() {
         throw new Error(
             "Could not create a new chat."
         );
+
     }
 
 
     currentChatId =
         result.chat_id;
 
-
-    // Use chats.js persistence function
-    // when available.
 
     if (
         typeof saveCurrentChatId ===
@@ -1535,6 +1653,7 @@ async function ensureCurrentChat() {
             "rag_current_chat_id",
             currentChatId
         );
+
     }
 
 
@@ -1559,11 +1678,14 @@ async function ensureCurrentChat() {
                 "Could not refresh chats:",
                 error
             );
+
         }
+
     }
 
 
     return currentChatId;
+
 }
 
 
@@ -1589,9 +1711,9 @@ function initializeUploadUI() {
         $("fileInput");
 
 
-    // =====================================================
-    // OPEN UPLOAD PANEL
-    // =====================================================
+    // -----------------------------------------------------
+    // OPEN
+    // -----------------------------------------------------
 
     if (
         uploadBtn &&
@@ -1608,12 +1730,13 @@ function initializeUploadUI() {
 
             }
         );
+
     }
 
 
-    // =====================================================
-    // CLOSE UPLOAD PANEL
-    // =====================================================
+    // -----------------------------------------------------
+    // CLOSE
+    // -----------------------------------------------------
 
     if (
         closeUploadBtn &&
@@ -1632,12 +1755,9 @@ function initializeUploadUI() {
 
             }
         );
+
     }
 
-
-    // =====================================================
-    // CHECK FILE INPUT
-    // =====================================================
 
     if (
         !chooseFilesBtn ||
@@ -1649,12 +1769,13 @@ function initializeUploadUI() {
         );
 
         return;
+
     }
 
 
-    // =====================================================
+    // -----------------------------------------------------
     // CHOOSE FILES
-    // =====================================================
+    // -----------------------------------------------------
 
     chooseFilesBtn.addEventListener(
         "click",
@@ -1666,9 +1787,9 @@ function initializeUploadUI() {
     );
 
 
-    // =====================================================
+    // -----------------------------------------------------
     // FILE SELECTED
-    // =====================================================
+    // -----------------------------------------------------
 
     fileInput.addEventListener(
         "change",
@@ -1685,6 +1806,7 @@ function initializeUploadUI() {
             ) {
 
                 return;
+
             }
 
 
@@ -1693,6 +1815,7 @@ function initializeUploadUI() {
             ) {
 
                 return;
+
             }
 
 
@@ -1710,39 +1833,26 @@ function initializeUploadUI() {
                     0;
 
 
-                // =================================================
-                // ENSURE CHAT
-                // =================================================
-
                 await ensureCurrentChat();
 
 
-                if (!currentChatId) {
+                if (
+                    !currentChatId
+                ) {
 
                     throw new Error(
                         "No active chat available for upload."
                     );
+
                 }
 
-
-                // =================================================
-                // UPLOAD EACH FILE
-                // =================================================
 
                 for (
                     const file of files
                 ) {
 
                     setStatus(
-                        `Uploading ${file.name}...`
-                    );
-
-
-                    console.log(
-                        "Uploading:",
-                        file.name,
-                        "Chat:",
-                        currentChatId
+                        `📄 Uploading ${file.name}...`
                     );
 
 
@@ -1759,10 +1869,6 @@ function initializeUploadUI() {
                     );
 
 
-                    // =================================================
-                    // SHOW IMMEDIATELY
-                    // =================================================
-
                     addUploadedDocument(
                         result,
                         file
@@ -1770,24 +1876,16 @@ function initializeUploadUI() {
 
 
                     uploadedCount++;
+
                 }
 
 
-                // =================================================
-                // IMPORTANT:
-                //
-                // NOW GET FILES DIRECTLY FROM BACKEND.
-                //
-                // This guarantees that the document shown in UI
-                // is actually associated with this chat.
-                // =================================================
-
                 await refreshCurrentChatDocuments();
 
-
-                // =================================================
-                // SUCCESS
-                // =================================================
+                // The upload request has completed and the document is now
+                // visible in the Documents list. Remove the live upload
+                // indicator before showing the final inline result.
+                setStatus("");
 
                 if (
                     uploadedCount === 1
@@ -1802,12 +1900,9 @@ function initializeUploadUI() {
                     setStatus(
                         `${uploadedCount} documents uploaded successfully.`
                     );
+
                 }
 
-
-                // =================================================
-                // CLOSE PANEL
-                // =================================================
 
                 if (
                     uploadPanel
@@ -1816,12 +1911,9 @@ function initializeUploadUI() {
                     uploadPanel.classList.remove(
                         "open"
                     );
+
                 }
 
-
-                // =================================================
-                // REFRESH SIDEBAR
-                // =================================================
 
                 if (
                     typeof loadChats ===
@@ -1838,7 +1930,9 @@ function initializeUploadUI() {
                             "Could not refresh chats after upload:",
                             error
                         );
+
                     }
+
                 }
 
 
@@ -1867,14 +1961,14 @@ function initializeUploadUI() {
                     false;
 
 
-                // Allow selecting same file again.
-
                 fileInput.value =
                     "";
+
             }
 
         }
     );
+
 }
 
 
@@ -1901,12 +1995,13 @@ function initializeQuestionInput() {
         );
 
         return;
+
     }
 
 
-    // =====================================================
+    // -----------------------------------------------------
     // SEND BUTTON
-    // =====================================================
+    // -----------------------------------------------------
 
     sendBtn.addEventListener(
         "click",
@@ -1918,9 +2013,9 @@ function initializeQuestionInput() {
     );
 
 
-    // =====================================================
-    // ENTER KEY
-    // =====================================================
+    // -----------------------------------------------------
+    // ENTER
+    // -----------------------------------------------------
 
     input.addEventListener(
         "keydown",
@@ -1935,15 +2030,16 @@ function initializeQuestionInput() {
                 event.preventDefault();
 
                 await sendQuestion();
+
             }
 
         }
     );
 
 
-    // =====================================================
+    // -----------------------------------------------------
     // AUTO RESIZE
-    // =====================================================
+    // -----------------------------------------------------
 
     input.addEventListener(
         "input",
@@ -1961,141 +2057,19 @@ function initializeQuestionInput() {
 
         }
     );
+
 }
 
 
 // =========================================================
-// SEND QUESTION
+// AUTOMATIC CHAT NAME
 // =========================================================
 
-async function sendQuestion() {
-
-    const input =
-        $("questionInput");
-
-    const sendBtn =
-        $("sendBtn");
-
-
-    // =====================================================
-    // BASIC VALIDATION
-    // =====================================================
-
-    if (!input) {
-        return;
-    }
-
-
-    const question =
-        input.value.trim();
-
-
-    if (!question) {
-        return;
-    }
-
-
-    // =====================================================
-    // DUPLICATE PROTECTION
-    // =====================================================
-
-    if (isAsking) {
-
-        console.log(
-            "Question already being processed."
-        );
-
-        return;
-    }
-
+function autoNameCurrentChat(
+    question
+) {
 
     try {
-
-        // =================================================
-        // ENSURE CHAT EXISTS
-        // =================================================
-
-        await ensureCurrentChat();
-
-
-        if (!currentChatId) {
-
-            throw new Error(
-                "No active chat available."
-            );
-        }
-
-
-        // =================================================
-        // LOCK REQUEST
-        // =================================================
-
-        isAsking =
-            true;
-
-
-        if (sendBtn) {
-
-            sendBtn.disabled =
-                true;
-        }
-
-
-        input.disabled =
-            true;
-
-
-        // =================================================
-        // HIDE EMPTY STATE
-        // =================================================
-
-        hideEmptyState();
-
-
-        // =================================================
-        // CAPTURE QUESTION
-        // =================================================
-
-        const submittedQuestion =
-            question;
-
-
-        // =================================================
-        // CLEAR INPUT IMMEDIATELY
-        // =================================================
-
-        input.value =
-            "";
-
-
-        input.style.height =
-            "auto";
-
-
-        // =================================================
-        // SHOW USER MESSAGE
-        // =================================================
-
-        renderMessage(
-            "user",
-            submittedQuestion
-        );
-
-
-        // =================================================
-        // AUTOMATIC CHAT NAME
-        // =================================================
-        //
-        // We use the chats.js function.
-        //
-        // IMPORTANT:
-        // We intentionally DO NOT await it.
-        //
-        // The actual question should not be blocked
-        // by the title update.
-        //
-        // Manual rename is protected inside autoNameChat().
-        // =================================================
 
         const chatsModule =
             window.RAGChats;
@@ -2110,7 +2084,7 @@ async function sendQuestion() {
             chatsModule
                 .autoNameChat(
                     currentChatId,
-                    submittedQuestion
+                    question
                 )
                 .catch(
                     error => {
@@ -2119,22 +2093,122 @@ async function sendQuestion() {
                             "Automatic chat naming failed:",
                             error
                         );
+
                     }
                 );
+
+        }
+
+    } catch (error) {
+
+        console.warn(
+            "Could not auto-name chat:",
+            error
+        );
+
+    }
+
+}
+
+
+// =========================================================
+// SEND NORMAL DOCUMENT QUESTION
+// =========================================================
+
+async function sendQuestion() {
+
+    const input =
+        $("questionInput");
+
+    const sendBtn =
+        $("sendBtn");
+
+
+    if (!input) {
+
+        return;
+
+    }
+
+
+    const question =
+        input.value.trim();
+
+
+    if (!question) {
+
+        return;
+
+    }
+
+
+    if (
+        isAsking ||
+        isRunningAction
+    ) {
+
+        return;
+
+    }
+
+
+    try {
+
+        await ensureCurrentChat();
+
+
+        if (
+            !currentChatId
+        ) {
+
+            throw new Error(
+                "No active chat available."
+            );
+
         }
 
 
-        // =================================================
-        // ASK BACKEND
-        // =================================================
-        //
-        // IMPORTANT:
-        //
-        // DO NOT call saveChatMessage() here.
-        //
-        // The backend /ask endpoint is already responsible
-        // for saving the question and answer.
-        // =================================================
+        isAsking =
+            true;
+
+
+        if (sendBtn) {
+
+            sendBtn.disabled =
+                true;
+
+        }
+
+
+        input.disabled =
+            true;
+
+
+        hideEmptyState();
+
+
+        const submittedQuestion =
+            question;
+
+
+        input.value =
+            "";
+
+
+        input.style.height =
+            "auto";
+
+
+        renderMessage(
+            "user",
+            submittedQuestion
+        );
+
+
+        autoNameCurrentChat(
+            submittedQuestion
+        );
+
 
         setStatus(
             "Thinking..."
@@ -2154,10 +2228,6 @@ async function sendQuestion() {
         );
 
 
-        // =================================================
-        // EXTRACT ANSWER
-        // =================================================
-
         const answer =
             response?.answer ||
             response?.response ||
@@ -2165,19 +2235,11 @@ async function sendQuestion() {
             "No answer returned.";
 
 
-        // =================================================
-        // EXTRACT SOURCES
-        // =================================================
-
         const sources =
             response?.sources ||
             response?.citations ||
             [];
 
-
-        // =================================================
-        // RENDER SOURCES
-        // =================================================
 
         if (
             Array.isArray(
@@ -2188,25 +2250,15 @@ async function sendQuestion() {
             renderSources(
                 sources
             );
+
         }
 
-
-        // =================================================
-        // SHOW ASSISTANT MESSAGE
-        // =================================================
 
         renderMessage(
             "assistant",
             answer
         );
 
-
-        // =================================================
-        // REFRESH SIDEBAR
-        // =================================================
-        //
-        // This gets the latest title from backend.
-        // =================================================
 
         if (
             typeof loadChats ===
@@ -2223,13 +2275,11 @@ async function sendQuestion() {
                     "Could not refresh chats:",
                     error
                 );
+
             }
+
         }
 
-
-        // =================================================
-        // RESTORE ACTIVE CHAT STYLE
-        // =================================================
 
         if (
             typeof updateActiveChatStyles ===
@@ -2246,12 +2296,9 @@ async function sendQuestion() {
 
             window.RAGChats
                 .highlightCurrentChat();
+
         }
 
-
-        // =================================================
-        // CLEAR STATUS
-        // =================================================
 
         setStatus("");
 
@@ -2276,10 +2323,6 @@ async function sendQuestion() {
 
     } finally {
 
-        // =================================================
-        // UNLOCK
-        // =================================================
-
         isAsking =
             false;
 
@@ -2288,6 +2331,7 @@ async function sendQuestion() {
 
             sendBtn.disabled =
                 false;
+
         }
 
 
@@ -2297,6 +2341,1454 @@ async function sendQuestion() {
                 false;
 
             input.focus();
+
+        }
+
+    }
+
+}
+
+
+// =========================================================
+// ACTION RESULT HELPERS
+// =========================================================
+
+function getResponseAnswer(
+    response,
+    fallback = ""
+) {
+
+    if (
+        response === undefined ||
+        response === null
+    ) {
+
+        return fallback;
+
+    }
+
+
+    if (
+        typeof response ===
+        "string"
+    ) {
+
+        return response;
+
+    }
+
+
+    return (
+        response.answer ||
+        response.response ||
+        response.content ||
+        response.text ||
+        fallback
+    );
+
+}
+
+
+// =========================================================
+// FORMAT QUIZ RESULT
+// =========================================================
+
+function formatQuizResult(
+    response
+) {
+
+    const quiz =
+        response?.quiz ||
+        response?.data ||
+        response;
+
+
+    if (
+        !quiz ||
+        typeof quiz !==
+        "object"
+    ) {
+
+        return getResponseAnswer(
+            response,
+            "Quiz generated successfully."
+        );
+
+    }
+
+
+    const questions =
+        Array.isArray(
+            quiz.questions
+        )
+            ? quiz.questions
+            : [];
+
+
+    if (
+        !questions.length
+    ) {
+
+        return getResponseAnswer(
+            response,
+            "Quiz generated successfully."
+        );
+
+    }
+
+
+    let output =
+        "## 🎯 Generated Quiz\n\n";
+
+
+    questions.forEach(
+        (question, index) => {
+
+            const questionText =
+                question.question ||
+                question.text ||
+                `Question ${index + 1}`;
+
+
+            output +=
+                `### ${index + 1}. ${questionText}\n\n`;
+
+
+            const options =
+                question.options ||
+                question.choices ||
+                [];
+
+
+            if (
+                Array.isArray(options)
+            ) {
+
+                options.forEach(
+                    (option, optionIndex) => {
+
+                        const letter =
+                            String.fromCharCode(
+                                65 + optionIndex
+                            );
+
+
+                        output +=
+                            `- ${letter}. ${option}\n`;
+
+                    }
+                );
+
+            }
+
+
+            if (
+                question.answer ||
+                question.correct_answer
+            ) {
+
+                output +=
+                    `\n**Answer:** ${
+                        question.answer ||
+                        question.correct_answer
+                    }\n`;
+
+            }
+
+
+            if (
+                question.explanation
+            ) {
+
+                output +=
+                    `**Explanation:** ${question.explanation}\n`;
+
+            }
+
+
+            output +=
+                "\n";
+
+        }
+    );
+
+
+    return output;
+
+}
+
+
+// =========================================================
+// FORMAT FLASHCARD RESULT
+// =========================================================
+
+function formatFlashcardResult(
+    response
+) {
+
+    const data =
+        response?.flashcards
+            ? response
+            : (
+                response?.data ||
+                response
+            );
+
+
+    const cards =
+        Array.isArray(
+            data?.flashcards
+        )
+            ? data.flashcards
+            : [];
+
+
+    if (
+        !cards.length
+    ) {
+
+        return getResponseAnswer(
+            response,
+            "Flashcards generated successfully."
+        );
+
+    }
+
+
+    let output =
+        "## 📑 Flashcards\n\n";
+
+
+    cards.forEach(
+        (card, index) => {
+
+            const front =
+                card.front ||
+                card.question ||
+                "";
+
+
+            const back =
+                card.back ||
+                card.answer ||
+                "";
+
+
+            output +=
+                `### Card ${index + 1}\n\n`;
+
+
+            output +=
+                `**Question:** ${front}\n\n`;
+
+
+            output +=
+                `**Answer:** ${back}\n\n`;
+
+
+            if (
+                card.source
+            ) {
+
+                output +=
+                    `📚 **Source:** ${card.source}\n\n`;
+
+            }
+
+        }
+    );
+
+
+    return output;
+
+}
+
+
+// =========================================================
+// DOCUMENT ASSISTANT MODES
+// SUMMARIZE / COMPARE / QUIZ / FLASHCARDS
+// =========================================================
+
+let modeQuizData = null;
+let modeQuizSubmitted = false;
+let modeFlashcardData = null;
+let modeFlashcardIndex = 0;
+let modeFlashcardFlipped = false;
+
+
+// =========================================================
+// MODE CONTROLS
+// =========================================================
+
+function getModeControls() {
+
+    let section =
+        document.getElementById("modeControls");
+
+    if (section) {
+        return section;
+    }
+
+    section = document.createElement("section");
+    section.id = "modeControls";
+    section.className = "mode-controls hidden";
+
+    const chatContainer =
+        document.getElementById("chatContainer");
+
+    if (chatContainer && chatContainer.parentNode) {
+        chatContainer.parentNode.insertBefore(
+            section,
+            chatContainer
+        );
+    }
+
+    return section;
+}
+
+
+function clearModeResult() {
+
+    const container =
+        document.getElementById("chatContainer");
+
+    if (!container) {
+        return;
+    }
+
+    container
+        .querySelectorAll(".mode-result")
+        .forEach(element => element.remove());
+}
+
+
+function hideModeControls() {
+
+    const controls =
+        document.getElementById("modeControls");
+
+    if (!controls) {
+        return;
+    }
+
+    controls.classList.add("hidden");
+    controls.innerHTML = "";
+}
+
+
+function modeButton(text, id) {
+    return `
+        <button
+            id="${id}"
+            class="primary-btn mode-action-button"
+            type="button"
+        >
+            ${text}
+        </button>
+    `;
+}
+
+
+// =========================================================
+// SUMMARIZE CONTROLS
+// =========================================================
+
+function renderSummaryControls() {
+
+    const controls = getModeControls();
+
+    controls.innerHTML = `
+        <div class="mode-card">
+            <div class="mode-card-title">📄 Summarize Documents</div>
+            <div class="mode-card-description">
+                Create one combined summary from all documents in this chat.
+            </div>
+
+            <div class="mode-form-row">
+                <label class="mode-field">
+                    <span>Summary length</span>
+                    <select id="summaryLength" class="mode-select">
+                        <option value="Short">Short</option>
+                        <option value="Medium" selected>Medium</option>
+                        <option value="Detailed">Detailed</option>
+                    </select>
+                </label>
+            </div>
+
+            ${modeButton("✨ Summarize All Documents", "summarizeBtn")}
+        </div>
+    `;
+
+    controls.classList.remove("hidden");
+
+    document
+        .getElementById("summarizeBtn")
+        ?.addEventListener("click", runSummary);
+}
+
+
+// =========================================================
+// COMPARE CONTROLS — EXACTLY 2 OR 3 DOCUMENTS
+// =========================================================
+
+async function renderCompareControls() {
+
+    const controls = getModeControls();
+
+    controls.innerHTML = `
+        <div class="mode-card">
+            <div class="mode-card-title">🔄 Compare Documents</div>
+            <div class="mode-card-description">
+                Select exactly 2 or 3 documents to compare.
+            </div>
+
+            <div class="mode-selection-hint">
+                Selected: <strong id="compareSelectedCount">0</strong> / 3
+            </div>
+
+            <div id="compareFileList" class="compare-file-list">
+                Loading documents...
+            </div>
+
+            ${modeButton("🔄 Compare Selected Documents", "compareBtn")}
+        </div>
+    `;
+
+    controls.classList.remove("hidden");
+
+    const list = document.getElementById("compareFileList");
+    const compareBtn = document.getElementById("compareBtn");
+
+    try {
+
+        const documents =
+            await refreshCurrentChatDocuments();
+
+        if (!documents.length) {
+            list.innerHTML = `
+                <div class="mode-empty">
+                    No documents uploaded in this chat.
+                </div>
+            `;
+            compareBtn.disabled = true;
+            compareBtn.classList.add("compare-locked");
+            return;
+        }
+
+        // Keep Compare visually locked until at least two documents exist.
+        compareBtn.classList.toggle(
+            "compare-locked",
+            documents.length < 2
+        );
+
+        list.innerHTML = documents
+            .map((file, index) => {
+                const name =
+                    file.file_name ||
+                    file.filename ||
+                    file.name ||
+                    `Document ${index + 1}`;
+
+                return `
+                    <label class="compare-file-item">
+                        <input
+                            type="checkbox"
+                            class="compare-checkbox"
+                            value="${escapeHtml(name)}"
+                        >
+                        <span class="compare-file-name">
+                            ${escapeHtml(name)}
+                        </span>
+                    </label>
+                `;
+            })
+            .join("");
+
+        const checkboxes =
+            Array.from(
+                list.querySelectorAll(".compare-checkbox")
+            );
+
+        const updateCompareState = () => {
+            const selected =
+                checkboxes.filter(checkbox => checkbox.checked);
+
+            const countElement =
+                document.getElementById("compareSelectedCount");
+
+            if (countElement) {
+                countElement.textContent = String(selected.length);
+            }
+
+            // Hard limit: only 3 documents can be selected.
+            checkboxes.forEach(checkbox => {
+                checkbox.disabled =
+                    !checkbox.checked && selected.length >= 3;
+            });
+
+            compareBtn.disabled =
+                documents.length < 2 ||
+                selected.length < 2 ||
+                selected.length > 3;
+
+            compareBtn.classList.toggle(
+                "compare-locked",
+                documents.length < 2
+            );
+        };
+
+        checkboxes.forEach(checkbox => {
+            checkbox.addEventListener("change", updateCompareState);
+        });
+
+        compareBtn.addEventListener("click", runComparison);
+        updateCompareState();
+
+    } catch (error) {
+
+        list.innerHTML = `
+            <div class="mode-error">
+                Could not load documents.
+            </div>
+        `;
+
+        compareBtn.disabled = true;
+        compareBtn.classList.add("compare-locked");
+
+        setStatus(
+            error.message || "Could not load documents.",
+            true
+        );
+    }
+}
+
+
+// =========================================================
+// QUIZ CONTROLS — DEFAULT 6 QUESTIONS
+// =========================================================
+
+function renderQuizControls() {
+
+    const controls = getModeControls();
+
+    controls.innerHTML = `
+        <div class="mode-card">
+            <div class="mode-card-title">🎯 Generate Quiz</div>
+            <div class="mode-card-description">
+                Create a 6-question interactive MCQ quiz from your documents.
+                Answers stay hidden until you submit.
+            </div>
+
+            <div class="mode-form-grid">
+                <label class="mode-field">
+                    <span>Questions</span>
+                    <select id="quizQuestionCount" class="mode-select">
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="4">4</option>
+                        <option value="5">5</option>
+                        <option value="6" selected>6</option>
+                        <option value="7">7</option>
+                        <option value="8">8</option>
+                        <option value="9">9</option>
+                        <option value="10">10</option>
+                    </select>
+                </label>
+
+                <label class="mode-field">
+                    <span>Difficulty</span>
+                    <select id="quizDifficulty" class="mode-select">
+                        <option value="Easy">Easy</option>
+                        <option value="Medium" selected>Medium</option>
+                        <option value="Hard">Hard</option>
+                    </select>
+                </label>
+            </div>
+
+            ${modeButton("🎯 Generate Quiz", "generateQuizBtn")}
+        </div>
+    `;
+
+    controls.classList.remove("hidden");
+
+    document
+        .getElementById("generateQuizBtn")
+        ?.addEventListener("click", runQuiz);
+}
+
+
+// =========================================================
+// FLASHCARD CONTROLS
+// =========================================================
+
+function renderFlashcardControls() {
+
+    const controls = getModeControls();
+
+    controls.innerHTML = `
+        <div class="mode-card">
+            <div class="mode-card-title">📑 Flashcards</div>
+            <div class="mode-card-description">
+                Generate interactive revision cards from your documents.
+            </div>
+
+            <div class="mode-form-grid">
+                <label class="mode-field">
+                    <span>Number of cards</span>
+                    <select id="flashcardCount" class="mode-select">
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="4">4</option>
+                        <option value="5">5</option>
+                        <option value="6">6</option>
+                        <option value="7">7</option>
+                        <option value="8">8</option>
+                        <option value="9">9</option>
+                        <option value="10" selected>10</option>
+                    </select>
+                </label>
+
+                <label class="mode-field">
+                    <span>Difficulty</span>
+                    <select id="flashcardDifficulty" class="mode-select">
+                        <option value="Easy">Easy</option>
+                        <option value="Medium" selected>Medium</option>
+                        <option value="Hard">Hard</option>
+                    </select>
+                </label>
+            </div>
+
+            ${modeButton("📑 Generate Flashcards", "generateFlashcardsBtn")}
+        </div>
+    `;
+
+    controls.classList.remove("hidden");
+
+    document
+        .getElementById("generateFlashcardsBtn")
+        ?.addEventListener("click", runFlashcards);
+}
+
+
+// =========================================================
+// SUMMARY
+// =========================================================
+
+async function runSummary() {
+
+    if (isRunningAction || isAsking || isUploading) {
+        return;
+    }
+
+    isRunningAction = true;
+
+    try {
+
+        await ensureCurrentChat();
+
+        const documents =
+            await refreshCurrentChatDocuments();
+
+        if (!documents.length) {
+            throw new Error(
+                "Please upload at least one document first."
+            );
+        }
+
+        const length =
+            document.getElementById("summaryLength")?.value ||
+            "Medium";
+
+        setStatus(
+            "📝 Reading documents and generating summary..."
+        );
+
+        const response =
+            await summarizeDocuments(
+                currentChatId,
+                length
+            );
+
+        clearModeResult();
+        hideModeControls();
+
+        renderMessage(
+            "assistant",
+            getResponseAnswer(
+                response,
+                "Summary generated successfully."
+            )
+        );
+
+        renderSources(
+            response?.sources ||
+            response?.citations ||
+            []
+        );
+
+        setStatus("");
+        await refreshChatsAfterMode();
+
+    } catch (error) {
+
+        console.error("Summary error:", error);
+
+        setStatus(
+            error.message || "Could not summarize documents.",
+            true
+        );
+
+    } finally {
+        isRunningAction = false;
+    }
+}
+
+
+// =========================================================
+// COMPARISON
+// =========================================================
+
+async function runComparison() {
+
+    if (isRunningAction || isAsking || isUploading) {
+        return;
+    }
+
+    const selected =
+        Array.from(
+            document.querySelectorAll(
+                ".compare-checkbox:checked"
+            )
+        )
+        .map(checkbox => checkbox.value)
+        .filter(Boolean);
+
+    if (selected.length < 2) {
+        setStatus(
+            "Please select at least two documents.",
+            true
+        );
+        return;
+    }
+
+    if (selected.length > 3) {
+        setStatus(
+            "You can compare a maximum of three documents.",
+            true
+        );
+        return;
+    }
+
+    isRunningAction = true;
+
+    try {
+
+        await ensureCurrentChat();
+
+        setStatus(
+            "🔄 Comparing selected documents..."
+        );
+
+        const response =
+            await compareDocuments(
+                currentChatId,
+                selected
+            );
+
+        clearModeResult();
+        hideModeControls();
+
+        renderMessage(
+            "assistant",
+            getResponseAnswer(
+                response,
+                "Documents compared successfully."
+            )
+        );
+
+        renderSources(
+            response?.sources ||
+            response?.citations ||
+            []
+        );
+
+        setStatus("");
+        await refreshChatsAfterMode();
+
+    } catch (error) {
+
+        console.error("Comparison error:", error);
+
+        setStatus(
+            error.message || "Could not compare documents.",
+            true
+        );
+
+    } finally {
+        isRunningAction = false;
+    }
+}
+
+
+// =========================================================
+// QUIZ GENERATION
+// =========================================================
+
+async function runQuiz() {
+
+    if (isRunningAction || isAsking || isUploading) {
+        return;
+    }
+
+    isRunningAction = true;
+
+    try {
+
+        await ensureCurrentChat();
+
+        const documents =
+            await refreshCurrentChatDocuments();
+
+        if (!documents.length) {
+            throw new Error(
+                "Please upload at least one document first."
+            );
+        }
+
+        const count = Math.min(
+            10,
+            Math.max(
+                2,
+                Number(
+                    document.getElementById("quizQuestionCount")?.value || 6
+                )
+            )
+        );
+        const difficulty =
+            document.getElementById("quizDifficulty")?.value ||
+            "Medium";
+
+        setStatus(
+            `🎯 Reading your documents and generating ${count}-question quiz...`
+        );
+
+        const response =
+            await generateDocumentQuiz(
+                currentChatId,
+                count,
+                difficulty
+            );
+
+        modeQuizData =
+            response?.quiz ||
+            response?.data ||
+            response;
+
+        if (!modeQuizData || !Array.isArray(modeQuizData.questions) || !modeQuizData.questions.length) {
+            throw new Error(
+                "The quiz generator returned an invalid quiz format."
+            );
+        }
+
+        // Enforce the requested 2–10 question range on the client.
+        modeQuizData.questions =
+            modeQuizData.questions.slice(0, count);
+
+        modeQuizSubmitted = false;
+
+        clearModeResult();
+        hideModeControls();
+
+        renderQuiz(
+            modeQuizData,
+            response?.sources || response?.citations || []
+        );
+
+        setStatus("");
+        await refreshChatsAfterMode();
+
+    } catch (error) {
+
+        console.error("Quiz error:", error);
+
+        setStatus(
+            error.message || "Could not generate quiz.",
+            true
+        );
+
+    } finally {
+        isRunningAction = false;
+    }
+}
+
+
+function getCorrectAnswerIndex(question) {
+
+    if (Number.isInteger(question?.correct_answer)) {
+        return question.correct_answer;
+    }
+
+    if (Number.isInteger(question?.correctAnswer)) {
+        return question.correctAnswer;
+    }
+
+    if (typeof question?.correct_answer === "string") {
+        const value = question.correct_answer.trim();
+        const numeric = Number(value);
+
+        if (Number.isInteger(numeric)) {
+            return numeric;
+        }
+
+        if (Array.isArray(question.options)) {
+            return question.options.findIndex(
+                option => String(option).trim() === value
+            );
+        }
+    }
+
+    if (typeof question?.answer === "string" && Array.isArray(question.options)) {
+        const value = question.answer.trim();
+        const numeric = Number(value);
+
+        if (Number.isInteger(numeric)) {
+            return numeric;
+        }
+
+        return question.options.findIndex(
+            option => String(option).trim() === value
+        );
+    }
+
+    return -1;
+}
+
+
+// =========================================================
+// RENDER INTERACTIVE QUIZ
+// =========================================================
+
+function renderQuiz(quiz, sources) {
+
+    const container =
+        document.getElementById("chatContainer");
+
+    if (!container) {
+        return;
+    }
+
+    hideEmptyState();
+
+    const questions =
+        Array.isArray(quiz?.questions)
+            ? quiz.questions.slice(0, 10)
+            : [];
+
+    const result = document.createElement("div");
+    result.className = "mode-result quiz-result";
+
+    result.innerHTML = `
+        <div class="mode-result-header">🧠 Interactive Quiz</div>
+        <div class="mode-result-subtitle">
+            ${questions.length} questions • Answers are revealed after submission
+        </div>
+        <div id="quizQuestions"></div>
+
+        <div class="quiz-submit-row">
+            <button id="submitQuizBtn" class="primary-btn" type="button">
+                ✅ Submit Quiz
+            </button>
+        </div>
+
+        <div id="quizScore" class="quiz-score hidden"></div>
+    `;
+
+    container.appendChild(result);
+
+    const questionsContainer =
+        result.querySelector("#quizQuestions");
+
+    questions.forEach((question, index) => {
+
+        const questionElement =
+            document.createElement("div");
+
+        questionElement.className = "quiz-question";
+
+        const options =
+            Array.isArray(question.options)
+                ? question.options
+                : Array.isArray(question.choices)
+                    ? question.choices
+                    : [];
+
+        questionElement.innerHTML = `
+            <div class="quiz-question-title">
+                Question ${index + 1}
+            </div>
+
+            <div class="quiz-question-text">
+                ${escapeHtml(
+                    question.question ||
+                    question.text ||
+                    ""
+                )}
+            </div>
+
+            <div class="quiz-options">
+                ${options
+                    .map((option, optionIndex) => `
+                        <label class="quiz-option">
+                            <input
+                                type="radio"
+                                name="quiz_${index}"
+                                value="${optionIndex}"
+                            >
+                            <span class="quiz-option-letter">
+                                ${String.fromCharCode(65 + optionIndex)}
+                            </span>
+                            <span class="quiz-option-text">
+                                ${escapeHtml(option)}
+                            </span>
+                        </label>
+                    `)
+                    .join("")}
+            </div>
+
+            <div class="quiz-review hidden"></div>
+        `;
+
+        questionsContainer.appendChild(questionElement);
+    });
+
+    const submitButton =
+        result.querySelector("#submitQuizBtn");
+
+    submitButton.addEventListener("click", () => {
+
+        if (modeQuizSubmitted) {
+            return;
+        }
+
+        let score = 0;
+        let answered = 0;
+
+        questions.forEach((question, index) => {
+
+            const selected =
+                result.querySelector(
+                    `input[name="quiz_${index}"]:checked`
+                );
+
+            const questionElement =
+                result.querySelectorAll(".quiz-question")[index];
+
+            const options =
+                questionElement.querySelectorAll(
+                    `input[name="quiz_${index}"]`
+                );
+
+            const correctIndex =
+                getCorrectAnswerIndex(question);
+
+            if (selected) {
+                answered++;
+            }
+
+            options.forEach(option => {
+                const label =
+                    option.closest(".quiz-option");
+
+                if (!label) {
+                    return;
+                }
+
+                label.classList.remove("correct", "wrong");
+
+                if (
+                    Number(option.value) ===
+                    correctIndex
+                ) {
+                    label.classList.add("correct");
+                }
+            });
+
+            if (
+                selected &&
+                Number(selected.value) === correctIndex
+            ) {
+                score++;
+            } else if (selected) {
+                selected
+                    .closest(".quiz-option")
+                    ?.classList.add("wrong");
+            }
+
+            const review =
+                questionElement.querySelector(".quiz-review");
+
+            const correctText =
+                Array.isArray(question.options) &&
+                correctIndex >= 0
+                    ? question.options[correctIndex]
+                    : question.correct_answer ||
+                      question.answer ||
+                      "Not available";
+
+            const yourText =
+                selected && Array.isArray(question.options)
+                    ? question.options[Number(selected.value)]
+                    : "Not answered";
+
+            review.innerHTML = `
+                <div class="quiz-review-answer">
+                    ${
+                        selected &&
+                        Number(selected.value) === correctIndex
+                            ? "✓ Correct"
+                            : "✗ Incorrect"
+                    }
+                </div>
+                <div>Your answer: <strong>${escapeHtml(yourText)}</strong></div>
+                <div>Correct answer: <strong>${escapeHtml(correctText)}</strong></div>
+                ${
+                    question.explanation
+                        ? `<div class="quiz-explanation">💡 ${escapeHtml(question.explanation)}</div>`
+                        : ""
+                }
+            `;
+
+            review.classList.remove("hidden");
+        });
+
+        modeQuizSubmitted = true;
+
+        const percentage =
+            questions.length
+                ? Math.round(
+                    (score / questions.length) * 100
+                )
+                : 0;
+
+        const scoreElement =
+            result.querySelector("#quizScore");
+
+        scoreElement.innerHTML = `
+            <div class="quiz-score-main">
+                ${percentage}%
+            </div>
+            <div class="quiz-score-detail">
+                Score: ${score} / ${questions.length}
+                • Answered: ${answered} / ${questions.length}
+            </div>
+        `;
+
+        scoreElement.classList.remove("hidden");
+        submitButton.disabled = true;
+        submitButton.textContent = "✓ Quiz Submitted";
+
+        result
+            .querySelectorAll("input[type=radio]")
+            .forEach(input => {
+                input.disabled = true;
+            });
+
+        scrollToBottom();
+    });
+
+    if (sources.length) {
+        renderSources(sources);
+    }
+
+    scrollToBottom();
+}
+
+
+// =========================================================
+// FLASHCARDS
+// =========================================================
+
+async function runFlashcards() {
+
+    if (isRunningAction || isAsking || isUploading) {
+        return;
+    }
+
+    isRunningAction = true;
+
+    try {
+
+        await ensureCurrentChat();
+
+        const documents =
+            await refreshCurrentChatDocuments();
+
+        if (!documents.length) {
+            throw new Error(
+                "Please upload at least one document first."
+            );
+        }
+
+        const count = Math.min(
+            10,
+            Math.max(
+                2,
+                Number(
+                    document.getElementById("flashcardCount")?.value || 10
+                )
+            )
+        );
+
+        const difficulty =
+            document.getElementById("flashcardDifficulty")?.value ||
+            "Medium";
+
+        setStatus("📑 Creating interactive flashcards...");
+
+        const response =
+            await generateDocumentFlashcards(
+                currentChatId,
+                count,
+                difficulty
+            );
+
+        const flashcardPayload = response?.flashcards;
+        const raw =
+            Array.isArray(flashcardPayload)
+                ? { flashcards: flashcardPayload }
+                : flashcardPayload ||
+                  response?.data ||
+                  response;
+
+        const cards =
+            Array.isArray(raw?.flashcards)
+                ? raw.flashcards
+                : [];
+
+        if (!cards.length) {
+            throw new Error(
+                "The flashcard generator returned no flashcards."
+            );
+        }
+
+        modeFlashcardData = {
+            ...raw,
+            flashcards: cards
+                .map(card => ({
+                    ...card,
+                    front:
+                        card.front ||
+                        card.question ||
+                        "",
+                    back:
+                        card.back ||
+                        card.answer ||
+                        ""
+                }))
+        };
+
+        modeFlashcardIndex = 0;
+        modeFlashcardFlipped = false;
+
+        clearModeResult();
+        hideModeControls();
+
+        renderFlashcards(
+            response?.sources || response?.citations || []
+        );
+
+        setStatus("");
+        await refreshChatsAfterMode();
+
+    } catch (error) {
+
+        console.error("Flashcard error:", error);
+
+        setStatus(
+            error.message || "Could not generate flashcards.",
+            true
+        );
+
+    } finally {
+        isRunningAction = false;
+    }
+}
+
+
+function renderFlashcards(sources) {
+
+    const container =
+        document.getElementById("chatContainer");
+
+    if (!container) {
+        return;
+    }
+
+    hideEmptyState();
+
+    const cards =
+        modeFlashcardData?.flashcards || [];
+
+    if (!cards.length) {
+        return;
+    }
+
+    const result = document.createElement("div");
+    result.className = "mode-result flashcard-result";
+
+    result.innerHTML = `
+        <div class="mode-result-header">📑 Flashcards</div>
+        <div id="flashcardCounter" class="mode-result-subtitle"></div>
+
+        <div id="flashcard" class="flashcard"></div>
+
+        <div class="flashcard-actions">
+            <button
+                id="prevFlashcard"
+                class="secondary-btn"
+                type="button"
+            >
+                ← Previous
+            </button>
+
+            <button
+                id="flipFlashcard"
+                class="primary-btn"
+                type="button"
+            >
+                🔄 Flip Card
+            </button>
+
+            <button
+                id="nextFlashcard"
+                class="secondary-btn"
+                type="button"
+            >
+                Next →
+            </button>
+        </div>
+    `;
+
+    container.appendChild(result);
+
+    result
+        .querySelector("#flipFlashcard")
+        .addEventListener("click", () => {
+            modeFlashcardFlipped = !modeFlashcardFlipped;
+            updateFlashcard(result);
+        });
+
+    result
+        .querySelector("#prevFlashcard")
+        .addEventListener("click", () => {
+            if (modeFlashcardIndex > 0) {
+                modeFlashcardIndex--;
+                modeFlashcardFlipped = false;
+                updateFlashcard(result);
+            }
+        });
+
+    result
+        .querySelector("#nextFlashcard")
+        .addEventListener("click", () => {
+            if (
+                modeFlashcardIndex <
+                cards.length - 1
+            ) {
+                modeFlashcardIndex++;
+                modeFlashcardFlipped = false;
+                updateFlashcard(result);
+            }
+        });
+
+    updateFlashcard(result);
+
+    if (sources.length) {
+        renderSources(sources);
+    }
+
+    scrollToBottom();
+}
+
+
+function updateFlashcard(result) {
+
+    const cards =
+        modeFlashcardData?.flashcards || [];
+
+    if (!cards.length) {
+        return;
+    }
+
+    const card =
+        cards[modeFlashcardIndex];
+
+    const flashcard =
+        result.querySelector("#flashcard");
+
+    const counter =
+        result.querySelector("#flashcardCounter");
+
+    if (!card || !flashcard || !counter) {
+        return;
+    }
+
+    counter.textContent =
+        `Card ${modeFlashcardIndex + 1} of ${cards.length}`;
+
+    const text =
+        modeFlashcardFlipped
+            ? card.back
+            : card.front;
+
+    flashcard.innerHTML = `
+        <div class="flashcard-label">
+            ${modeFlashcardFlipped ? "ANSWER" : "QUESTION"}
+        </div>
+
+        <div class="flashcard-text">
+            ${escapeHtml(text || "")}
+        </div>
+
+        ${
+            modeFlashcardFlipped && card.source
+                ? `
+                    <div class="flashcard-source">
+                        Source: ${escapeHtml(card.source)}
+                    </div>
+                `
+                : ""
+        }
+    `;
+
+    const previous =
+        result.querySelector("#prevFlashcard");
+
+    const next =
+        result.querySelector("#nextFlashcard");
+
+    previous.disabled =
+        modeFlashcardIndex === 0;
+
+    next.disabled =
+        modeFlashcardIndex === cards.length - 1;
+}
+
+
+// =========================================================
+// REFRESH CHAT SIDEBAR
+// =========================================================
+
+async function refreshChatsAfterMode() {
+
+    if (typeof loadChats === "function") {
+        try {
+            await loadChats();
+        } catch (error) {
+            console.warn(
+                "Could not refresh chats:",
+                error
+            );
         }
     }
 }
@@ -2309,121 +3801,87 @@ async function sendQuestion() {
 function initializeActionButtons() {
 
     const buttons =
-        document.querySelectorAll(
-            ".action-btn"
-        );
+        document.querySelectorAll(".action-btn");
 
-
-    buttons.forEach(
-        button => {
-
-            button.addEventListener(
-                "click",
-                () => {
-
-                    buttons.forEach(
-                        item => {
-
-                            item.classList.remove(
-                                "active"
-                            );
-
-                        }
-                    );
-
-
-                    button.classList.add(
-                        "active"
-                    );
-
-
-                    currentAction =
-                        button.dataset.action ||
-                        "ask";
-
-
-                    handleActionChange(
-                        currentAction
-                    );
-
-                }
-            );
-
-        }
-    );
-}
-
-
-// =========================================================
-// ACTION CHANGE
-// =========================================================
-
-function handleActionChange(
-    action
-) {
-
-    switch (action) {
-
-        case "ask":
-
-            setStatus("");
-
-            break;
-
-
-        case "compare":
-
-            setStatus(
-                "Compare Documents will be connected next."
-            );
-
-            break;
-
-
-        case "summarize":
-
-            setStatus(
-                "Summarize will be connected next."
-            );
-
-            break;
-
-
-        case "quiz":
-
-            setStatus(
-                "Generate Quiz will be connected next."
-            );
-
-            break;
-
-
-        case "flashcards":
-
-            setStatus(
-                "Flashcards will be connected next."
-            );
-
-            break;
-
-
-        default:
-
-            setStatus("");
+    if (!buttons.length) {
+        console.warn("No action buttons found.");
+        return;
     }
+
+    // Prevent duplicate listeners if initialization is called again.
+    buttons.forEach(button => {
+        if (button.dataset.modeInitialized === "true") {
+            return;
+        }
+
+        button.dataset.modeInitialized = "true";
+
+        button.addEventListener("click", async () => {
+
+            if (isRunningAction || isAsking || isUploading) {
+                return;
+            }
+
+            buttons.forEach(item => {
+                item.classList.remove("active");
+            });
+
+            button.classList.add("active");
+
+            currentAction =
+                button.dataset.action || "ask";
+
+            clearModeResult();
+            hideModeControls();
+
+            if (currentAction === "ask") {
+                setStatus("");
+                document.getElementById("questionInput")?.focus();
+                return;
+            }
+
+            if (currentAction === "summarize") {
+                renderSummaryControls();
+                return;
+            }
+
+            if (currentAction === "compare") {
+                await renderCompareControls();
+                return;
+            }
+
+            if (currentAction === "quiz") {
+                renderQuizControls();
+                return;
+            }
+
+            if (currentAction === "flashcards") {
+                renderFlashcardControls();
+                return;
+            }
+
+            // YouTube remains handled by the existing YouTube controls.
+            if (currentAction === "youtube") {
+                setStatus("");
+            }
+        });
+    });
 }
 
 
 // =========================================================
-// YOUTUBE
+// YOUTUBE VIDEO ID
 // =========================================================
+
 
 function extractYouTubeVideoId(
     url
 ) {
 
     if (!url) {
+
         return null;
+
     }
 
 
@@ -2433,9 +3891,9 @@ function extractYouTubeVideoId(
             new URL(url);
 
 
-        // =====================================================
-        // youtube.com/watch?v=...
-        // =====================================================
+        // -----------------------------------------------------
+        // youtube.com/watch?v=
+        // -----------------------------------------------------
 
         if (
             parsed.hostname.includes(
@@ -2452,13 +3910,15 @@ function extractYouTubeVideoId(
             if (id) {
 
                 return id;
+
             }
+
         }
 
 
-        // =====================================================
-        // youtu.be/VIDEO_ID
-        // =====================================================
+        // -----------------------------------------------------
+        // youtu.be/
+        // -----------------------------------------------------
 
         if (
             parsed.hostname.includes(
@@ -2472,12 +3932,13 @@ function extractYouTubeVideoId(
                     ""
                 )
                 .split("?")[0];
+
         }
 
 
-        // =====================================================
-        // youtube.com/embed/VIDEO_ID
-        // =====================================================
+        // -----------------------------------------------------
+        // youtube.com/embed/
+        // -----------------------------------------------------
 
         if (
             parsed.pathname.startsWith(
@@ -2491,6 +3952,7 @@ function extractYouTubeVideoId(
                 )[1]
                 ?.split("/")[0] ||
                 null;
+
         }
 
 
@@ -2500,10 +3962,12 @@ function extractYouTubeVideoId(
             "Invalid YouTube URL:",
             error
         );
+
     }
 
 
     return null;
+
 }
 
 
@@ -2528,6 +3992,7 @@ function showYouTubeVideo(
     ) {
 
         return;
+
     }
 
 
@@ -2545,6 +4010,7 @@ function showYouTubeVideo(
         );
 
         return;
+
     }
 
 
@@ -2564,6 +4030,7 @@ function showYouTubeVideo(
     setStatus(
         "YouTube video loaded."
     );
+
 }
 
 
@@ -2584,6 +4051,7 @@ function hideYouTubeVideo() {
 
         iframe.src =
             "";
+
     }
 
 
@@ -2596,7 +4064,9 @@ function hideYouTubeVideo() {
 
         panel.style.display =
             "none";
+
     }
+
 }
 
 
@@ -2626,6 +4096,7 @@ function initializeYouTubeUI() {
 
             }
         );
+
     }
 
 
@@ -2650,6 +4121,7 @@ function initializeYouTubeUI() {
                     );
 
                     return;
+
                 }
 
 
@@ -2667,21 +4139,152 @@ function initializeYouTubeUI() {
                     );
 
                     return;
+
                 }
 
 
-                showYouTubeVideo(
-                    url
-                );
+                try {
+
+                    await ensureCurrentChat();
 
 
-                setStatus(
-                    "YouTube video loaded. Transcript analysis endpoint is not connected yet."
-                );
+                    showYouTubeVideo(
+                        url
+                    );
+
+
+                    // -------------------------------------------------
+                    // YouTube UI currently loads the video.
+                    //
+                    // Actual multimodal question is sent through
+                    // askYouTubeMultimodal().
+                    // -------------------------------------------------
+
+                    setStatus(
+                        "YouTube video loaded."
+                    );
+
+
+                } catch (error) {
+
+                    console.error(
+                        "YouTube initialization failed:",
+                        error
+                    );
+
+
+                    setStatus(
+                        error.message ||
+                        "Could not load YouTube video.",
+                        true
+                    );
+
+                }
 
             }
         );
+
     }
+
+}
+
+
+// =========================================================
+// YOUTUBE MULTIMODAL ASK
+// =========================================================
+//
+// This function is available for the UI/question flow.
+//
+// Backend:
+//
+// POST
+// /api/chats/{chat_id}/youtube/ask
+//
+// =========================================================
+
+async function askYouTubeQuestion(
+    videoUrl,
+    question
+) {
+
+    if (
+        !videoUrl ||
+        !videoUrl.trim()
+    ) {
+
+        throw new Error(
+            "YouTube video URL is required."
+        );
+
+    }
+
+
+    if (
+        !question ||
+        !question.trim()
+    ) {
+
+        throw new Error(
+            "Question cannot be empty."
+        );
+
+    }
+
+
+    await ensureCurrentChat();
+
+
+    if (
+        !currentChatId
+    ) {
+
+        throw new Error(
+            "No active chat available."
+        );
+
+    }
+
+
+    const response =
+        await askYouTubeMultimodal(
+            currentChatId,
+            videoUrl.trim(),
+            question.trim()
+        );
+
+
+    const answer =
+        getResponseAnswer(
+            response,
+            "No YouTube answer returned."
+        );
+
+
+    const sources =
+        response?.sources ||
+        response?.citations ||
+        [];
+
+
+    renderMessage(
+        "user",
+        question.trim()
+    );
+
+
+    renderMessage(
+        "assistant",
+        answer
+    );
+
+
+    renderSources(
+        sources
+    );
+
+
+    return response;
+
 }
 
 
@@ -2703,6 +4306,7 @@ async function initializeApiHealth() {
             );
 
             return;
+
         }
 
 
@@ -2731,6 +4335,7 @@ async function initializeApiHealth() {
                 "Unexpected health response:",
                 result
             );
+
         }
 
 
@@ -2745,7 +4350,9 @@ async function initializeApiHealth() {
         console.warn(
             "Continuing application initialization..."
         );
+
     }
+
 }
 
 
@@ -2755,12 +4362,13 @@ async function initializeApiHealth() {
 
 async function restoreSavedChat() {
 
-    let savedChatId = null;
+    let savedChatId =
+        null;
 
 
-    // =====================================================
+    // -----------------------------------------------------
     // Prefer chats.js helper
-    // =====================================================
+    // -----------------------------------------------------
 
     if (
         window.RAGChats &&
@@ -2778,6 +4386,7 @@ async function restoreSavedChat() {
             localStorage.getItem(
                 "rag_current_chat_id"
             );
+
     }
 
 
@@ -2788,6 +4397,7 @@ async function restoreSavedChat() {
         );
 
         return;
+
     }
 
 
@@ -2798,10 +4408,6 @@ async function restoreSavedChat() {
 
 
     try {
-
-        // =================================================
-        // Use chats.js selectChat
-        // =================================================
 
         if (
             window.RAGChats &&
@@ -2821,10 +4427,9 @@ async function restoreSavedChat() {
 
 
             return;
+
         }
 
-
-        // Fallback for older loading order.
 
         if (
             typeof selectChat ===
@@ -2835,7 +4440,9 @@ async function restoreSavedChat() {
                 savedChatId
             );
 
+
             return;
+
         }
 
 
@@ -2852,8 +4459,6 @@ async function restoreSavedChat() {
         );
 
 
-        // Remove only invalid saved ID.
-
         localStorage.removeItem(
             "rag_current_chat_id"
         );
@@ -2869,8 +4474,11 @@ async function restoreSavedChat() {
                 .setCurrentChatId(
                     null
                 );
+
         }
+
     }
+
 }
 
 
@@ -2888,14 +4496,6 @@ async function initializeApp() {
     // =====================================================
     // CHAT CONTROLS
     // =====================================================
-    //
-    // chats.js now initializes itself.
-    //
-    // We still call initializeChatControls if available,
-    // because this makes app.js compatible with the module.
-    //
-    // chats.js protects against duplicate listeners.
-    // =====================================================
 
     try {
 
@@ -2907,6 +4507,7 @@ async function initializeApp() {
 
             window.RAGChats
                 .initializeChatControls();
+
         }
 
     } catch (error) {
@@ -2915,6 +4516,7 @@ async function initializeApp() {
             "Chat controls initialization failed:",
             error
         );
+
     }
 
 
@@ -2932,6 +4534,7 @@ async function initializeApp() {
             "Action buttons initialization failed:",
             error
         );
+
     }
 
 
@@ -2949,6 +4552,7 @@ async function initializeApp() {
             "Upload UI initialization failed:",
             error
         );
+
     }
 
 
@@ -2966,6 +4570,7 @@ async function initializeApp() {
             "Question input initialization failed:",
             error
         );
+
     }
 
 
@@ -2983,14 +4588,12 @@ async function initializeApp() {
             "YouTube UI initialization failed:",
             error
         );
+
     }
 
 
     // =====================================================
     // BACKEND HEALTH
-    // =====================================================
-    //
-    // Do not block app startup.
     // =====================================================
 
     initializeApiHealth();
@@ -3023,6 +4626,7 @@ async function initializeApp() {
             throw new Error(
                 "loadChats() is not available."
             );
+
         }
 
 
@@ -3043,6 +4647,7 @@ async function initializeApp() {
             "Could not load recent chats.",
             true
         );
+
     }
 
 
@@ -3059,9 +4664,6 @@ async function initializeApp() {
 
     try {
 
-        // If a chat was restored, get its documents
-        // directly from backend.
-
         if (
             typeof currentChatId !==
                 "undefined" &&
@@ -3073,6 +4675,7 @@ async function initializeApp() {
         } else {
 
             renderDocumentLibrary();
+
         }
 
 
@@ -3085,6 +4688,7 @@ async function initializeApp() {
 
 
         renderDocumentLibrary();
+
     }
 
 
@@ -3100,11 +4704,47 @@ async function initializeApp() {
 
         window.RAGChats
             .highlightCurrentChat();
+
     }
 
 
     console.log(
         "✅ Multi-Modal RAG Assistant initialized."
+    );
+
+}
+
+// =========================================================
+// SIDEBAR TOGGLE
+// =========================================================
+
+function initializeSidebarToggle() {
+    const sidebar =
+        document.getElementById("sidebar");
+
+    const toggleButton =
+        document.getElementById("sidebarToggle");
+
+    if (!sidebar || !toggleButton) {
+        return;
+    }
+
+    toggleButton.addEventListener(
+        "click",
+        () => {
+            const isCollapsed =
+                sidebar.classList.toggle(
+                    "sidebar-collapsed"
+                );
+
+            toggleButton.textContent =
+                isCollapsed ? "›" : "‹";
+
+            toggleButton.title =
+                isCollapsed
+                    ? "Expand sidebar"
+                    : "Collapse sidebar";
+        }
     );
 }
 
@@ -3129,6 +4769,7 @@ if (
 } else {
 
     initializeApp();
+
 }
 
 
@@ -3164,13 +4805,26 @@ window.RAGApp = {
 
     sendQuestion,
 
+    askYouTubeQuestion,
+
     initializeUploadUI,
 
     initializeQuestionInput,
 
     initializeYouTubeUI,
 
+    runDocumentAction,
+
+    runSummarizeAction,
+
+    runCompareAction,
+
+    runQuizAction,
+
+    runFlashcardsAction,
+
     restoreSavedChat
+
 };
 
 

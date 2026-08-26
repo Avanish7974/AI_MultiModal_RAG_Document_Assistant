@@ -2,6 +2,7 @@
 <html lang="en">
 
 <head>
+
     <meta charset="UTF-8">
 
     <meta
@@ -9,400 +10,521 @@
         content="width=device-width, initial-scale=1.0"
     >
 
-    <title>Multi-Modal RAG Document Assistant</title>
+    <meta
+        name="theme-color"
+        content="#080a10"
+    >
+
+    <title>
+        RAG Assistant
+    </title>
 
     <link
         rel="stylesheet"
         href="css/style.css"
     >
+
 </head>
+
 
 <body>
 
-    <div class="app">
+<div class="app">
 
-        <!-- =====================================================
-             SIDEBAR
-        ====================================================== -->
 
-        <aside class="sidebar">
+    <!-- =====================================================
+         SIDEBAR
+    ====================================================== -->
 
-            <!-- HEADER -->
+    <aside
+        class="sidebar"
+        id="sidebar"
+    >
 
-            <div class="sidebar-header">
+        <!-- BRAND -->
 
-                <div class="brand">
-                    <span class="brand-icon">📄</span>
+        <div class="sidebar-brand">
 
-                    <span class="brand-name">
-                        RAG Assistant
-                    </span>
+            <div class="brand-left">
+
+                <div class="brand-logo">
+                    ✨
                 </div>
 
+                <span class="brand-name">
+                    RAG Assistant
+                </span>
+
+            </div>
+
+
+            <button
+                id="sidebarToggle"
+                class="sidebar-toggle"
+                type="button"
+                title="Collapse sidebar"
+            >
+                ‹
+            </button>
+
+        </div>
+
+
+        <!-- NEW CHAT -->
+
+        <button
+            id="newChatBtn"
+            class="new-chat-btn"
+            type="button"
+        >
+
+            <span class="new-chat-icon">
+                +
+            </span>
+
+            <span>
+                New Chat
+            </span>
+
+        </button>
+
+
+        <!-- =================================================
+             RECENT CHATS
+        ================================================== -->
+
+        <section class="sidebar-section recent-section">
+
+            <div class="sidebar-section-header">
+
+                <span class="sidebar-section-title">
+                    RECENT CHATS
+                </span>
+
+            </div>
+
+
+            <div
+                id="recentChats"
+                class="recent-chats"
+            >
+
+                <div class="chat-loading">
+                    Loading chats...
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- =================================================
+             DOCUMENTS
+        ================================================== -->
+
+        <section class="sidebar-section documents-section">
+
+            <div class="sidebar-section-header">
+
+                <span class="sidebar-section-title">
+                    DOCUMENTS
+                </span>
+
                 <button
-                    id="newChatBtn"
-                    class="new-chat-btn"
+                    id="viewAllDocumentsBtn"
+                    class="view-all-btn"
+                    type="button"
                 >
-                    <span>＋</span>
-                    <span>New Chat</span>
+                    View all
                 </button>
 
             </div>
 
 
-            <!-- RECENT CHATS -->
-
-            <section class="recent-chats-section">
-
-                <div class="section-title">
-                    <span>🕘</span>
-                    <span>Recent Chats</span>
-                </div>
-
-                <div
-                    id="recentChats"
-                    class="recent-chats"
-                >
-
-                    <!--
-                        Chats will be loaded dynamically
-                        using JavaScript.
-                    -->
-
-                    <div class="chat-loading">
-                        Loading chats...
-                    </div>
-
-                </div>
-
-            </section>
-
-
-            <!-- ACTIONS -->
-
-            <section class="actions-section">
-
-                <div class="section-title">
-                    <span>⚡</span>
-                    <span>What do you want to do?</span>
-                </div>
-
-                <p class="section-subtitle">
-                    Choose a task and use its dedicated controls.
-                </p>
-
-
-                <div class="actions-grid">
-
-                    <button
-                        class="action-btn active"
-                        data-action="ask"
-                    >
-                        <span class="action-icon">💬</span>
-                        <span>Ask Documents</span>
-                    </button>
-
-
-                    <button
-                        class="action-btn"
-                        data-action="compare"
-                    >
-                        <span class="action-icon">🔄</span>
-                        <span>Compare Documents</span>
-                    </button>
-
-
-                    <button
-                        class="action-btn"
-                        data-action="summarize"
-                    >
-                        <span class="action-icon">📄</span>
-                        <span>Summarize</span>
-                    </button>
-
-
-                    <button
-                        class="action-btn"
-                        data-action="quiz"
-                    >
-                        <span class="action-icon">🎯</span>
-                        <span>Generate Quiz</span>
-                    </button>
-
-
-                    <button
-                        class="action-btn"
-                        data-action="flashcards"
-                    >
-                        <span class="action-icon">📑</span>
-                        <span>Flashcards</span>
-                    </button>
-
-                </div>
-
-            </section>
-
-
-            <!-- GEMINI MODE -->
-
-            <section class="gemini-card">
-
-                <div class="gemini-title">
-                    ✨ Gemini Mode
-                </div>
-
-                <div class="gemini-description">
-                    Using Google Gemini for answer generation.
-                </div>
-
-            </section>
-
-
-            <!-- SETTINGS -->
-
-            <section class="sidebar-settings">
-
-                <div class="section-title">
-                    <span>⚙️</span>
-                    <span>Settings</span>
-                </div>
-
-            </section>
-
-        </aside>
-
-
-        <!-- =====================================================
-             MAIN CONTENT
-        ====================================================== -->
-
-        <main class="main-content">
-
-
-            <!-- TOP BAR -->
-
-            <header class="topbar">
-
-                <div class="topbar-left">
-
-                    <h1>
-                        Multi-Modal RAG Document Assistant
-                    </h1>
-
-                    <p>
-                        Upload your documents, choose what you want
-                        to do, and get grounded AI results with sources.
-                    </p>
-
-                </div>
-
-                <div class="topbar-right">
-
-                    <button
-                        id="uploadBtn"
-                        class="topbar-btn"
-                    >
-                        📤 Upload
-                    </button>
-
-                </div>
-
-            </header>
-
-
-            <!-- =================================================
-                 UPLOAD AREA
-            ================================================== -->
-
-            <section
-                id="uploadPanel"
-                class="upload-panel"
-            >
-
-                <div class="upload-header">
-
-                    <div>
-
-                        <h2>
-                            📁 Add to this chat
-                        </h2>
-
-                        <p>
-                            Upload documents or add a YouTube video.
-                        </p>
-
-                    </div>
-
-                    <button
-                        id="closeUploadBtn"
-                        class="close-btn"
-                    >
-                        ×
-                    </button>
-
-                </div>
-
-
-                <div class="upload-options">
-
-                    <!-- FILE UPLOAD -->
-
-                    <div class="upload-box">
-
-                        <div class="upload-icon">
-                            📄
-                        </div>
-
-                        <h3>
-                            Upload Documents
-                        </h3>
-
-                        <p>
-                            PDF, DOCX, PPTX, TXT, CSV,
-                            XLSX and images
-                        </p>
-
-                        <input
-                            type="file"
-                            id="fileInput"
-                            multiple
-                            hidden
-                        >
-
-                        <button
-                            id="chooseFilesBtn"
-                            class="secondary-btn"
-                        >
-                            Choose Files
-                        </button>
-
-                    </div>
-
-
-                    <!-- YOUTUBE -->
-
-                    <div class="upload-box">
-
-                        <div class="upload-icon">
-                            🎥
-                        </div>
-
-                        <h3>
-                            YouTube Video
-                        </h3>
-
-                        <p>
-                            Analyze a YouTube video's transcript.
-                        </p>
-
-                        <input
-                            type="text"
-                            id="youtubeUrl"
-                            class="youtube-input"
-                            placeholder="Paste YouTube URL..."
-                        >
-
-                        <button
-                            id="analyzeYoutubeBtn"
-                            class="primary-btn"
-                        >
-                            Analyze YouTube Video
-                        </button>
-
-                    </div>
-
-                </div>
-
-            </section>
-
-
-            <!-- =================================================
-                 YOUTUBE PLAYER
-            ================================================== -->
-
-            <section
-                id="youtubePanel"
-                class="youtube-panel hidden"
-            >
-
-                <div class="youtube-player-container">
-
-                    <div class="youtube-player">
-
-                        <iframe
-                            id="youtubePlayer"
-                            src=""
-                            title="YouTube video player"
-                            allow="accelerometer; autoplay; clipboard-write;
-                                   encrypted-media; gyroscope; picture-in-picture;
-                                   web-share"
-                            allowfullscreen
-                        >
-                        </iframe>
-
-                    </div>
-
-
-                    <div class="youtube-controls">
-
-                        <div class="youtube-title">
-                            🎥 YouTube Video
-                        </div>
-
-                        <button
-                            id="closeYoutubeBtn"
-                            class="secondary-btn"
-                        >
-                            Close
-                        </button>
-
-                    </div>
-
-                </div>
-
-            </section>
-
-
-<!-- =====================================================
-     DOCUMENT LIBRARY
-     ===================================================== -->
-
-<div
-    id="documentLibrary"
-    class="document-library"
-    style="display: none;"
->
-
-    <div class="document-library-header">
-
-        <div>
-            <div class="document-library-title">
-                📚 Documents in this Chat
-            </div>
+            <!--
+                app.js already renders documents here.
+                We intentionally keep the existing IDs.
+            -->
 
             <div
-                id="documentLibraryCount"
-                class="document-library-count"
+                id="documentLibrary"
+                class="document-library"
             >
-                0 documents
+
+                <div
+                    id="documentLibraryCount"
+                    class="document-library-count"
+                >
+                    0 documents
+                </div>
+
+
+                <div
+                    id="documentList"
+                    class="document-list"
+                >
+                </div>
+
             </div>
+
+        </section>
+
+
+        <!-- =================================================
+             SIDEBAR BOTTOM
+        ================================================== -->
+
+        <div class="sidebar-bottom">
+
+
+            <!-- UPLOAD IS INTENTIONALLY NOT HERE -->
+
+
+            <!-- USER -->
+
+            <div class="sidebar-user">
+
+                <div class="user-avatar">
+                    AV
+                </div>
+
+
+                <div class="user-info">
+
+                    <div class="user-name">
+                        Avanish
+                    </div>
+
+                    <div class="user-plan">
+                        Free plan
+                    </div>
+
+                </div>
+
+
+                <button
+                    class="settings-btn"
+                    type="button"
+                    title="Settings"
+                >
+                    ⚙
+                </button>
+
+            </div>
+
         </div>
 
-    </div>
+    </aside>
 
 
-    <div
-        id="documentList"
-        class="document-list"
-    >
-    </div>
 
-</div>            
+    <!-- =====================================================
+         MAIN CONTENT
+    ====================================================== -->
+
+    <main class="main-content">
+
+
+        <!-- =================================================
+             TOP HEADER
+        ================================================== -->
+
+        <header class="topbar">
+
+
+            <div class="topbar-left">
+
+                <div class="workspace-label">
+                    YOUR AI WORKSPACE
+                </div>
+
+
+                <h1>
+                    Hello, Avanish! 👋
+                </h1>
+
+
+                <p>
+                    Ask anything about your documents or videos.
+                </p>
+
+            </div>
+
+
+            <!-- THE ONLY UPLOAD BUTTON -->
+
+            <div class="topbar-right">
+
+                <button
+                    id="uploadBtn"
+                    class="topbar-upload-btn"
+                    type="button"
+                >
+
+                    <span>
+                        ↑
+                    </span>
+
+                    <span>
+                        Upload
+                    </span>
+
+                </button>
+
+            </div>
+
+        </header>
+
+
+
+        <!-- =================================================
+             AI MODES
+        ================================================== -->
+
+        <section class="modes-section">
+
+
+            <div class="section-heading">
+
+                <div class="section-eyebrow">
+                    AI MODES
+                </div>
+
+                <h2>
+                    What would you like to do today?
+                </h2>
+
+            </div>
+
 
 
             <!-- =================================================
-                 EMPTY STATE
+                 SIX MODE CARDS
             ================================================== -->
+
+            <div class="modes-grid">
+
+
+                <!-- ASK -->
+
+                <button
+                    class="action-btn mode-card active"
+                    data-action="ask"
+                    type="button"
+                >
+
+                    <div class="mode-card-top">
+
+                        <div class="mode-icon mode-purple">
+                            💬
+                        </div>
+
+                        <div class="mode-arrow">
+                            →
+                        </div>
+
+                    </div>
+
+
+                    <div class="mode-title">
+                        Ask Documents
+                    </div>
+
+
+                    <div class="mode-description">
+                        Get answers from your documents
+                    </div>
+
+                </button>
+
+
+
+                <!-- SUMMARIZE -->
+
+                <button
+                    class="action-btn mode-card"
+                    data-action="summarize"
+                    type="button"
+                >
+
+                    <div class="mode-card-top">
+
+                        <div class="mode-icon mode-green">
+                            ≡
+                        </div>
+
+                        <div class="mode-arrow">
+                            →
+                        </div>
+
+                    </div>
+
+
+                    <div class="mode-title">
+                        Summarize
+                    </div>
+
+
+                    <div class="mode-description">
+                        Extract key insights and summaries
+                    </div>
+
+                </button>
+
+
+
+                <!-- COMPARE -->
+
+                <button
+                    class="action-btn mode-card"
+                    data-action="compare"
+                    type="button"
+                >
+
+                    <div class="mode-card-top">
+
+                        <div class="mode-icon mode-blue">
+                            ▦
+                        </div>
+
+                        <div class="mode-arrow">
+                            →
+                        </div>
+
+                    </div>
+
+
+                    <div class="mode-title">
+                        Compare
+                    </div>
+
+
+                    <div class="mode-description">
+                        Compare multiple documents
+                    </div>
+
+                </button>
+
+
+
+                <!-- QUIZ -->
+
+                <button
+                    class="action-btn mode-card"
+                    data-action="quiz"
+                    type="button"
+                >
+
+                    <div class="mode-card-top">
+
+                        <div class="mode-icon mode-orange">
+                            ◎
+                        </div>
+
+                        <div class="mode-arrow">
+                            →
+                        </div>
+
+                    </div>
+
+
+                    <div class="mode-title">
+                        Generate Quiz
+                    </div>
+
+
+                    <div class="mode-description">
+                        Test your knowledge with quizzes
+                    </div>
+
+                </button>
+
+
+
+                <!-- FLASHCARDS -->
+
+                <button
+                    class="action-btn mode-card"
+                    data-action="flashcards"
+                    type="button"
+                >
+
+                    <div class="mode-card-top">
+
+                        <div class="mode-icon mode-pink">
+                            ▣
+                        </div>
+
+                        <div class="mode-arrow">
+                            →
+                        </div>
+
+                    </div>
+
+
+                    <div class="mode-title">
+                        Flashcards
+                    </div>
+
+
+                    <div class="mode-description">
+                        Create study flashcards automatically
+                    </div>
+
+                </button>
+
+
+
+                <!-- YOUTUBE -->
+
+                <button
+                    class="action-btn mode-card"
+                    data-action="youtube"
+                    type="button"
+                >
+
+                    <div class="mode-card-top">
+
+                        <div class="mode-icon mode-red">
+                            ▶
+                        </div>
+
+                        <div class="mode-arrow">
+                            →
+                        </div>
+
+                    </div>
+
+
+                    <div class="mode-title">
+                        YouTube Analysis
+                    </div>
+
+
+                    <div class="mode-description">
+                        Analyze YouTube videos with AI
+                    </div>
+
+                </button>
+
+
+            </div>
+
+        </section>
+
+
+
+        <!-- =================================================
+             CONVERSATION / CHAT AREA
+        ================================================== -->
+
+        <section
+            id="conversationPanel"
+            class="conversation-panel"
+        >
+
+
+            <!-- EMPTY STATE -->
 
             <section
                 id="emptyState"
@@ -410,35 +532,37 @@
             >
 
                 <div class="empty-icon">
-                    🤖
+                    💬
                 </div>
 
-                <h2>
-                    What would you like to know?
-                </h2>
 
-                <p>
-                    Upload a document or YouTube video,
-                    then ask questions about it.
-                </p>
+                <div class="empty-title">
+                    Start a conversation
+                </div>
+
+
+                <div class="empty-description">
+
+                    Ask anything about your documents,
+                    <br class="desktop-break">
+                    spreadsheets, or YouTube videos.
+
+                </div>
 
             </section>
 
 
+
             <!-- =================================================
-                 CHAT AREA
+                 CHAT MESSAGES
             ================================================== -->
 
             <section
                 id="chatContainer"
                 class="chat-container"
             >
-
-                <!--
-                    Messages will be inserted dynamically.
-                -->
-
             </section>
+
 
 
             <!-- =================================================
@@ -455,85 +579,351 @@
                     <span>Sources</span>
                 </div>
 
+
                 <div
                     id="sourcesContainer"
                     class="sources-container"
                 >
-
                 </div>
 
             </section>
 
+        </section>
 
-            <!-- =================================================
-                 CHAT INPUT
-            ================================================== -->
+
+
+        <!-- =================================================
+             CHAT COMPOSER
+        ================================================== -->
+
+        <section class="composer-section">
+
 
             <div class="chat-input-wrapper">
+
 
                 <textarea
                     id="questionInput"
                     rows="1"
                     placeholder="Ask anything about your documents..."
+                    autocomplete="off"
                 ></textarea>
 
+
+
+                <div class="composer-bottom">
+
+
+                    <!-- LEFT CONTROLS -->
+
+                    <div class="composer-tools">
+
+
+                        <!-- ATTACH -->
+
+                        <button
+                            id="attachBtn"
+                            class="composer-tool"
+                            type="button"
+                        >
+
+                            <span class="tool-icon">
+                                📎
+                            </span>
+
+                            <span>
+                                Attach
+                            </span>
+
+                        </button>
+
+
+
+                        <div class="composer-divider">
+                        </div>
+
+
+
+                        <!-- GEMINI -->
+
+                        <button
+                            id="modelBtn"
+                            class="composer-tool model-selector"
+                            type="button"
+                        >
+
+                            <span class="gemini-icon">
+                                ✨
+                            </span>
+
+                            <span>
+                                Gemini 1.5 Pro
+                            </span>
+
+                            <span class="dropdown-arrow">
+                                ˅
+                            </span>
+
+                        </button>
+
+
+                    </div>
+
+
+
+                    <!-- SEND -->
+
+                    <button
+                        id="sendBtn"
+                        class="send-btn"
+                        type="button"
+                        title="Send"
+                    >
+                        ↑
+                    </button>
+
+
+                </div>
+
+            </div>
+
+
+            <div class="composer-hint">
+                Press Enter to send · Shift + Enter for a new line
+            </div>
+
+
+        </section>
+
+
+
+        <!-- =================================================
+             STATUS
+        ================================================== -->
+
+        <div
+            id="statusMessage"
+            class="status-message"
+        >
+        </div>
+
+
+
+        <!-- =================================================
+             UPLOAD PANEL
+             
+             IMPORTANT:
+             This is NOT a second upload button.
+             It opens only when the top-right Upload button
+             is clicked.
+        ================================================== -->
+
+        <section
+            id="uploadPanel"
+            class="upload-panel"
+        >
+
+            <div class="upload-panel-header">
+
+                <div>
+
+                    <div class="upload-panel-title">
+                        📁 Add to this chat
+                    </div>
+
+                    <div class="upload-panel-subtitle">
+                        Upload documents or add a YouTube video.
+                    </div>
+
+                </div>
+
+
                 <button
-                    id="sendBtn"
-                    class="send-btn"
-                    title="Send"
+                    id="closeUploadBtn"
+                    class="upload-close-btn"
+                    type="button"
                 >
-                    ↑
+                    ×
                 </button>
 
             </div>
 
 
-            <!-- STATUS -->
 
-            <div
-                id="statusMessage"
-                class="status-message"
-            >
+            <div class="upload-options">
+
+
+                <!-- DOCUMENT UPLOAD -->
+
+                <div class="upload-box">
+
+                    <div class="upload-box-icon">
+                        📄
+                    </div>
+
+                    <h3>
+                        Upload Documents
+                    </h3>
+
+                    <p>
+                        PDF, DOCX, PPTX, TXT, CSV,
+                        XLSX and images
+                    </p>
+
+
+                    <input
+                        type="file"
+                        id="fileInput"
+                        multiple
+                        hidden
+                        accept=".pdf,.doc,.docx,.ppt,.pptx,.txt,.csv,.xlsx,.xls,.png,.jpg,.jpeg"
+                    >
+
+
+                    <button
+                        id="chooseFilesBtn"
+                        class="secondary-btn"
+                        type="button"
+                    >
+                        Choose Files
+                    </button>
+
+                </div>
+
+
+
+                <!-- YOUTUBE -->
+
+                <div class="upload-box">
+
+                    <div class="upload-box-icon">
+                        🎥
+                    </div>
+
+                    <h3>
+                        YouTube Video
+                    </h3>
+
+                    <p>
+                        Analyze a YouTube video with AI.
+                    </p>
+
+
+                    <input
+                        type="text"
+                        id="youtubeUrl"
+                        class="youtube-input"
+                        placeholder="Paste YouTube URL..."
+                    >
+
+
+                    <button
+                        id="analyzeYoutubeBtn"
+                        class="primary-btn"
+                        type="button"
+                    >
+                        Analyze YouTube Video
+                    </button>
+
+                </div>
+
             </div>
 
-        </main>
-
-    </div>
+        </section>
 
 
-    <!-- =========================================================
-         CHAT CONTEXT MENU
-    ========================================================== -->
 
-    <div
-        id="chatContextMenu"
-        class="context-menu hidden"
+        <!-- =================================================
+             YOUTUBE PLAYER
+        ================================================== -->
+
+        <section
+            id="youtubePanel"
+            class="youtube-panel hidden"
+        >
+
+            <div class="youtube-player-container">
+
+                <div class="youtube-player">
+
+                    <iframe
+                        id="youtubePlayer"
+                        src=""
+                        title="YouTube video player"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        allowfullscreen
+                    >
+                    </iframe>
+
+                </div>
+
+
+                <div class="youtube-controls">
+
+                    <div class="youtube-title">
+                        🎥 YouTube Video
+                    </div>
+
+
+                    <button
+                        id="closeYoutubeBtn"
+                        class="secondary-btn"
+                        type="button"
+                    >
+                        Close
+                    </button>
+
+                </div>
+
+            </div>
+
+        </section>
+
+
+    </main>
+
+</div>
+
+
+
+<!-- =========================================================
+     CHAT CONTEXT MENU
+========================================================== -->
+
+<div
+    id="chatContextMenu"
+    class="context-menu hidden"
+>
+
+    <button
+        id="renameChatBtn"
+        type="button"
     >
-
-        <button
-            id="renameChatBtn"
-        >
-            ✏️ Rename
-        </button>
-
-        <button
-            id="deleteChatBtn"
-        >
-            🗑️ Delete
-        </button>
-
-    </div>
+        ✏️ Rename
+    </button>
 
 
-    <!-- =========================================================
-         JAVASCRIPT
-    ========================================================== -->
+    <button
+        id="deleteChatBtn"
+        type="button"
+    >
+        🗑️ Delete
+    </button>
 
-    <script src="js/api.js"></script>
+</div>
 
-    <script src="js/chats.js"></script>
 
-    <script src="js/app.js"></script>
+
+<!-- =========================================================
+     JAVASCRIPT
+========================================================== -->
+
+<script src="js/api.js"></script>
+
+<script src="js/chats.js"></script>
+
+<script src="js/app.js"></script>
+
 
 </body>
 

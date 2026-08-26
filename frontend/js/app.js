@@ -8,18 +8,15 @@
 // API functions are provided by api.js
 // Chat state/functions are provided by chats.js
 //
-// DO NOT declare:
+// This file connects:
 //
-// API_BASE_URL
-// currentChatId
-// createChat
-// getChats
-// uploadDocument
-// askDocuments
-// saveChatMessage
-// loadChats
-// getChat
-// selectChat
+// 💬 Ask Documents
+// 📄 Summarize
+// 🔄 Compare Documents
+// 🎯 Generate Quiz
+// 📑 Flashcards
+// 📁 Upload Documents
+// 🎥 YouTube Multimodal
 //
 // =========================================================
 
@@ -34,18 +31,7 @@ let isUploading = false;
 
 let isAsking = false;
 
-
-// =========================================================
-// YOUTUBE STATE
-// =========================================================
-//
-// When a YouTube video is loaded, this stores its URL.
-// sendQuestion() uses this URL to decide whether the
-// question should go through normal RAG or Level-2
-// multimodal YouTube analysis.
-// =========================================================
-
-let currentYouTubeUrl = "";
+let isRunningAction = false;
 
 
 // =========================================================
@@ -55,6 +41,7 @@ let currentYouTubeUrl = "";
 function $(id) {
 
     return document.getElementById(id);
+
 }
 
 
@@ -62,41 +49,160 @@ function $(id) {
 // STATUS MESSAGE
 // =========================================================
 
+
+// =========================================================
+// STATUS MESSAGE / AI PROCESSING INDICATOR
+// =========================================================
+// =========================================================
+// STATUS MESSAGE / CHATGPT-STYLE PROCESSING
+// =========================================================
+
 function setStatus(
     message,
     isError = false
 ) {
-
     const status =
         $("statusMessage");
 
+    const chatContainer =
+        $("chatContainer");
+
+    const text =
+        message || "";
+
+    /*
+     * Processing messages belong INSIDE the conversation.
+     *
+     * Examples:
+     * Thinking...
+     * Analyzing images
+     * Reading documents...
+     * Generating answer...
+     */
+    const isProcessing =
+        Boolean(text) &&
+        !isError &&
+        /thinking|analyzing|processing|generating|reading|searching/i
+            .test(text);
+
+    // -----------------------------------------------------
+    // REMOVE OLD INLINE PROCESSING INDICATOR
+    // -----------------------------------------------------
+
+    const oldProcessing =
+        document.querySelector(
+            ".rag-processing-status"
+        );
+
+    if (oldProcessing) {
+        oldProcessing.remove();
+    }
+
+    // -----------------------------------------------------
+    // PROCESSING STATE
+    // -----------------------------------------------------
+
+    if (isProcessing && chatContainer) {
+
+        if (status) {
+            status.style.display =
+                "none";
+        }
+
+        const userMessages =
+            chatContainer.querySelectorAll(
+                ".message.user"
+            );
+
+        const latestUserMessage =
+            userMessages[
+                userMessages.length - 1
+            ];
+
+        if (latestUserMessage) {
+
+            const processing =
+                document.createElement(
+                    "div"
+                );
+
+            processing.className =
+                "rag-processing-status";
+
+            processing.innerHTML = `
+                <span
+                    class="processing-dot"
+                    aria-hidden="true"
+                ></span>
+
+                <span
+                    class="processing-text"
+                >${escapeHtml(text)}</span>
+
+                <span
+                    class="processing-dots"
+                    aria-hidden="true"
+                >•••</span>
+            `;
+
+            /*
+             * IMPORTANT:
+             * Insert immediately after the user's
+             * message — NOT after the composer.
+             */
+            latestUserMessage.insertAdjacentElement(
+                "afterend",
+                processing
+            );
+
+            document.body.classList.add(
+                "rag-processing"
+            );
+
+            scrollToBottom();
+
+            return;
+        }
+    }
+
+    // -----------------------------------------------------
+    // PROCESSING FINISHED
+    // -----------------------------------------------------
+
+    document.body.classList.remove(
+        "rag-processing"
+    );
+
+    // -----------------------------------------------------
+    // NORMAL / ERROR STATUS
+    // -----------------------------------------------------
 
     if (!status) {
 
-        if (message) {
-            console.log(message);
+        if (text) {
+            console.log(text);
         }
 
         return;
     }
 
-
     status.textContent =
-        message || "";
-
+        text;
 
     status.classList.toggle(
         "error",
         Boolean(isError)
     );
 
+    status.classList.remove(
+        "processing"
+    );
 
     status.style.display =
-        message
+        text
             ? "block"
             : "none";
 }
-
 
 // =========================================================
 // EMPTY STATE
@@ -113,7 +219,9 @@ function showEmptyState() {
         emptyState.classList.remove(
             "hidden"
         );
+
     }
+
 }
 
 
@@ -128,7 +236,9 @@ function hideEmptyState() {
         emptyState.classList.add(
             "hidden"
         );
+
     }
+
 }
 
 
@@ -144,13 +254,16 @@ function clearChatInterface() {
 
     if (container) {
 
-        container.innerHTML = "";
+        container.innerHTML =
+            "";
+
     }
 
 
     hideSources();
 
     showEmptyState();
+
 }
 
 
@@ -171,6 +284,7 @@ function escapeHtml(text) {
 
 
     return div.innerHTML;
+
 }
 
 
@@ -180,18 +294,257 @@ function escapeHtml(text) {
 
 function formatAnswer(text) {
 
-    if (!text) {
+    if (
+        text === undefined ||
+        text === null
+    ) {
+
         return "";
+
     }
 
 
+    /*
+     * TABLE FIX — surgical patch
+     *
+     * Keep the original Markdown formatter completely intact.
+     * Only extract Markdown comparison tables before escapeHtml()
+     * so they can be rendered as real HTML tables.
+     */
+
+    const tableHtml = [];
+
+    let source =
+        String(text)
+            .replace(/\r\n/g, "\n")
+            .replace(/\r/g, "\n");
+
+
+    const lines =
+        source.split("\n");
+
+    const outputLines = [];
+
+    let i = 0;
+
+
+    while (
+        i < lines.length
+    ) {
+
+        const header =
+            lines[i];
+
+        const separator =
+            lines[i + 1];
+
+
+        /*
+         * Only treat a block as a table when the SECOND row is
+         * definitely a Markdown separator row. This prevents
+         * normal text, citations, URLs, and other features from
+         * being accidentally changed.
+         */
+
+        if (
+            i + 1 < lines.length &&
+            header.includes("|") &&
+            separator.includes("|")
+        ) {
+
+            const separatorCells =
+                separator
+                    .trim()
+                    .replace(/^\|/, "")
+                    .replace(/\|$/, "")
+                    .split("|")
+                    .map(
+                        cell =>
+                            cell.trim()
+                    );
+
+
+            const isTable =
+                separatorCells.length >= 2 &&
+                separatorCells.every(
+                    cell =>
+                        /^:?-{3,}:?$/.test(
+                            cell
+                        )
+                );
+
+
+            if (
+                isTable
+            ) {
+
+                const splitRow =
+                    row => {
+
+                        let value =
+                            String(row)
+                                .trim();
+
+
+                        if (
+                            value.startsWith("|")
+                        ) {
+
+                            value =
+                                value.slice(1);
+
+                        }
+
+
+                        if (
+                            value.endsWith("|")
+                        ) {
+
+                            value =
+                                value.slice(
+                                    0,
+                                    -1
+                                );
+
+                        }
+
+
+                        return value
+                            .split("|")
+                            .map(
+                                cell =>
+                                    cell.trim()
+                            );
+
+                    };
+
+
+                const headers =
+                    splitRow(header);
+
+                const rows = [];
+
+                let j =
+                    i + 2;
+
+
+                while (
+                    j < lines.length &&
+                    lines[j].includes("|") &&
+                    lines[j].trim()
+                ) {
+
+                    rows.push(
+                        splitRow(
+                            lines[j]
+                        )
+                    );
+
+                    j++;
+
+                }
+
+
+                const cellEscape =
+                    value =>
+                        escapeHtml(
+                            String(
+                                value || ""
+                            )
+                        );
+
+
+                const headerHtml =
+                    headers
+                        .map(
+                            cell =>
+                                `<th>${cellEscape(cell)}</th>`
+                        )
+                        .join("");
+
+
+                const bodyHtml =
+                    rows
+                        .map(
+                            cells => {
+
+                                return `
+                                    <tr>
+                                        ${headers
+                                            .map(
+                                                (_, index) =>
+                                                    `<td>${cellEscape(
+                                                        cells[index] || ""
+                                                    )}</td>`
+                                            )
+                                            .join("")}
+                                    </tr>
+                                `;
+
+                            }
+                        )
+                        .join("");
+
+
+                const token =
+                    `__RAG_COMPARISON_TABLE_${tableHtml.length}__`;
+
+
+                tableHtml.push(
+                    `
+                    <div class="answer-table-wrap">
+                        <table class="answer-table">
+                            <thead>
+                                <tr>${headerHtml}</tr>
+                            </thead>
+                            <tbody>
+                                ${bodyHtml}
+                            </tbody>
+                        </table>
+                    </div>
+                    `
+                );
+
+
+                outputLines.push(
+                    token
+                );
+
+
+                i = j;
+
+                continue;
+
+            }
+
+        }
+
+
+        outputLines.push(
+            lines[i]
+        );
+
+        i++;
+
+    }
+
+
+    /*
+     * IMPORTANT:
+     * From this point onward this is the ORIGINAL formatter.
+     * This preserves headings, bold, inline code, bullets,
+     * lists, line breaks, and all other existing behavior.
+     */
+
     let html =
-        escapeHtml(text);
+        escapeHtml(
+            outputLines.join("\n")
+        );
 
 
-    // =====================================================
+    // -----------------------------------------------------
     // H3
-    // =====================================================
+    // -----------------------------------------------------
 
     html =
         html.replace(
@@ -200,9 +553,9 @@ function formatAnswer(text) {
         );
 
 
-    // =====================================================
+    // -----------------------------------------------------
     // H2
-    // =====================================================
+    // -----------------------------------------------------
 
     html =
         html.replace(
@@ -211,9 +564,9 @@ function formatAnswer(text) {
         );
 
 
-    // =====================================================
+    // -----------------------------------------------------
     // H1
-    // =====================================================
+    // -----------------------------------------------------
 
     html =
         html.replace(
@@ -222,9 +575,9 @@ function formatAnswer(text) {
         );
 
 
-    // =====================================================
+    // -----------------------------------------------------
     // BOLD
-    // =====================================================
+    // -----------------------------------------------------
 
     html =
         html.replace(
@@ -233,9 +586,9 @@ function formatAnswer(text) {
         );
 
 
-    // =====================================================
+    // -----------------------------------------------------
     // INLINE CODE
-    // =====================================================
+    // -----------------------------------------------------
 
     html =
         html.replace(
@@ -244,9 +597,9 @@ function formatAnswer(text) {
         );
 
 
-    // =====================================================
+    // -----------------------------------------------------
     // BULLET POINTS
-    // =====================================================
+    // -----------------------------------------------------
 
     html =
         html.replace(
@@ -255,9 +608,9 @@ function formatAnswer(text) {
         );
 
 
-    // =====================================================
+    // -----------------------------------------------------
     // GROUP LIST ITEMS
-    // =====================================================
+    // -----------------------------------------------------
 
     html =
         html.replace(
@@ -267,9 +620,9 @@ function formatAnswer(text) {
         );
 
 
-    // =====================================================
+    // -----------------------------------------------------
     // NEW LINES
-    // =====================================================
+    // -----------------------------------------------------
 
     html =
         html.replace(
@@ -278,11 +631,38 @@ function formatAnswer(text) {
         );
 
 
+    /*
+     * Restore the real table AFTER all normal Markdown
+     * formatting is finished.
+     */
+
+    tableHtml.forEach(
+        (table, index) => {
+
+            const token =
+                `__RAG_COMPARISON_TABLE_${index}__`;
+
+
+            html =
+                html.replace(
+                    new RegExp(
+                        token,
+                        "g"
+                    ),
+                    table
+                );
+
+        }
+    );
+
+
     return html;
+
 }
 
 
 // =========================================================
+
 // SCROLL TO BOTTOM
 // =========================================================
 
@@ -295,22 +675,28 @@ function scrollToBottom() {
 
 
     if (!main) {
+
         return;
+
     }
 
 
-    requestAnimationFrame(() => {
+    requestAnimationFrame(
+        () => {
 
-        main.scrollTo({
+            main.scrollTo({
 
-            top:
-                main.scrollHeight,
+                top:
+                    main.scrollHeight,
 
-            behavior:
-                "smooth"
-        });
+                behavior:
+                    "smooth"
 
-    });
+            });
+
+        }
+    );
+
 }
 
 
@@ -334,6 +720,7 @@ function renderMessage(
         );
 
         return;
+
     }
 
 
@@ -354,9 +741,9 @@ function renderMessage(
         }`;
 
 
-    // =====================================================
+    // -----------------------------------------------------
     // HEADER
-    // =====================================================
+    // -----------------------------------------------------
 
     const header =
         document.createElement(
@@ -400,14 +787,15 @@ function renderMessage(
         icon
     );
 
+
     header.appendChild(
         name
     );
 
 
-    // =====================================================
+    // -----------------------------------------------------
     // CONTENT
-    // =====================================================
+    // -----------------------------------------------------
 
     const contentElement =
         document.createElement(
@@ -437,6 +825,7 @@ function renderMessage(
 
         contentElement.textContent =
             content || "";
+
     }
 
 
@@ -456,6 +845,7 @@ function renderMessage(
 
 
     scrollToBottom();
+
 }
 
 
@@ -472,7 +862,9 @@ function renderMessages(
 
 
     if (!container) {
+
         return;
+
     }
 
 
@@ -488,6 +880,7 @@ function renderMessages(
         showEmptyState();
 
         return;
+
     }
 
 
@@ -507,6 +900,7 @@ function renderMessages(
 
 
     scrollToBottom();
+
 }
 
 
@@ -528,6 +922,7 @@ function hideSources() {
         section.classList.add(
             "hidden"
         );
+
     }
 
 
@@ -535,7 +930,9 @@ function hideSources() {
 
         container.innerHTML =
             "";
+
     }
+
 }
 
 
@@ -560,6 +957,7 @@ function renderSources(
     ) {
 
         return;
+
     }
 
 
@@ -577,6 +975,7 @@ function renderSources(
         );
 
         return;
+
     }
 
 
@@ -635,6 +1034,7 @@ function renderSources(
                 parts.push(
                     `Page ${source.page}`
                 );
+
             }
 
 
@@ -645,6 +1045,7 @@ function renderSources(
                 parts.push(
                     source.source_type
                 );
+
             }
 
 
@@ -666,6 +1067,7 @@ function renderSources(
                 card.appendChild(
                     location
                 );
+
             }
 
 
@@ -675,6 +1077,7 @@ function renderSources(
 
         }
     );
+
 }
 
 
@@ -687,6 +1090,7 @@ function getChatDocumentsKey(
 ) {
 
     return `rag_documents_${chatId}`;
+
 }
 
 
@@ -695,7 +1099,9 @@ function getChatDocuments(
 ) {
 
     if (!chatId) {
+
         return [];
+
     }
 
 
@@ -710,7 +1116,9 @@ function getChatDocuments(
 
 
         if (!stored) {
+
             return [];
+
         }
 
 
@@ -727,6 +1135,7 @@ function getChatDocuments(
         ) {
 
             return [];
+
         }
 
 
@@ -742,7 +1151,9 @@ function getChatDocuments(
 
 
         return [];
+
     }
+
 }
 
 
@@ -756,23 +1167,31 @@ function saveChatDocuments(
 ) {
 
     if (!chatId) {
+
         return;
+
     }
 
 
     try {
 
         localStorage.setItem(
+
             getChatDocumentsKey(
                 chatId
             ),
+
             JSON.stringify(
-                Array.isArray(documents)
+
+                Array.isArray(
+                    documents
+                )
                     ? documents
                     : []
-            )
-        );
 
+            )
+
+        );
 
     } catch (error) {
 
@@ -780,7 +1199,9 @@ function saveChatDocuments(
             "Could not save chat documents:",
             error
         );
+
     }
+
 }
 
 
@@ -801,6 +1222,7 @@ function formatFileSize(
     ) {
 
         return "";
+
     }
 
 
@@ -813,6 +1235,7 @@ function formatFileSize(
     ) {
 
         return `${size} B`;
+
     }
 
 
@@ -823,6 +1246,7 @@ function formatFileSize(
         return `${(
             size / 1024
         ).toFixed(1)} KB`;
+
     }
 
 
@@ -834,6 +1258,7 @@ function formatFileSize(
             size /
             (1024 * 1024)
         ).toFixed(1)} MB`;
+
     }
 
 
@@ -841,6 +1266,7 @@ function formatFileSize(
         size /
         (1024 * 1024 * 1024)
     ).toFixed(1)} GB`;
+
 }
 
 
@@ -866,6 +1292,7 @@ function getDocumentIcon(
     ) {
 
         return "📕";
+
     }
 
 
@@ -875,6 +1302,7 @@ function getDocumentIcon(
     ) {
 
         return "📘";
+
     }
 
 
@@ -884,6 +1312,7 @@ function getDocumentIcon(
     ) {
 
         return "📙";
+
     }
 
 
@@ -894,6 +1323,7 @@ function getDocumentIcon(
     ) {
 
         return "📊";
+
     }
 
 
@@ -904,6 +1334,7 @@ function getDocumentIcon(
     ) {
 
         return "🖼️";
+
     }
 
 
@@ -912,10 +1343,12 @@ function getDocumentIcon(
     ) {
 
         return "📄";
+
     }
 
 
     return "📁";
+
 }
 
 
@@ -979,7 +1412,9 @@ function normalizeDocumentForUI(
             doc?.uploaded_at ||
             doc?.created_at ||
             new Date().toISOString()
+
     };
+
 }
 
 
@@ -1004,15 +1439,10 @@ function renderDocumentLibrary() {
         !documentList
     ) {
 
-        console.warn(
-            "Document library elements not found."
-        );
-
         return;
+
     }
 
-
-    // currentChatId belongs to chats.js.
 
     if (
         typeof currentChatId ===
@@ -1026,15 +1456,15 @@ function renderDocumentLibrary() {
         documentList.innerHTML =
             "";
 
-
         if (countElement) {
 
             countElement.textContent =
                 "0 documents";
+
         }
 
-
         return;
+
     }
 
 
@@ -1054,6 +1484,7 @@ function renderDocumentLibrary() {
             documents.length === 1
                 ? "1 document"
                 : `${documents.length} documents`;
+
     }
 
 
@@ -1065,6 +1496,7 @@ function renderDocumentLibrary() {
             "none";
 
         return;
+
     }
 
 
@@ -1110,10 +1542,6 @@ function renderDocumentLibrary() {
                 "rgba(255,255,255,0.04)";
 
 
-            // =================================================
-            // ICON
-            // =================================================
-
             const icon =
                 document.createElement(
                     "div"
@@ -1130,10 +1558,6 @@ function renderDocumentLibrary() {
             icon.style.fontSize =
                 "28px";
 
-
-            // =================================================
-            // INFO
-            // =================================================
 
             const info =
                 document.createElement(
@@ -1188,6 +1612,7 @@ function renderDocumentLibrary() {
                 parts.push(
                     doc.file_type
                 );
+
             }
 
 
@@ -1204,12 +1629,16 @@ function renderDocumentLibrary() {
                     );
 
 
-                if (formattedSize) {
+                if (
+                    formattedSize
+                ) {
 
                     parts.push(
                         formattedSize
                     );
+
                 }
+
             }
 
 
@@ -1224,6 +1653,7 @@ function renderDocumentLibrary() {
                 parts.push(
                     `${doc.chunks} chunks`
                 );
+
             }
 
 
@@ -1251,10 +1681,6 @@ function renderDocumentLibrary() {
                 meta
             );
 
-
-            // =================================================
-            // STATUS
-            // =================================================
 
             const status =
                 document.createElement(
@@ -1304,6 +1730,7 @@ function renderDocumentLibrary() {
 
         }
     );
+
 }
 
 
@@ -1322,6 +1749,7 @@ async function refreshCurrentChatDocuments() {
         renderDocumentLibrary();
 
         return [];
+
     }
 
 
@@ -1366,6 +1794,7 @@ async function refreshCurrentChatDocuments() {
 
             files =
                 response.documents;
+
         }
 
 
@@ -1377,8 +1806,6 @@ async function refreshCurrentChatDocuments() {
                     )
             );
 
-
-        // Backend is source of truth.
 
         saveChatDocuments(
             currentChatId,
@@ -1406,16 +1833,15 @@ async function refreshCurrentChatDocuments() {
         );
 
 
-        // Keep cached documents if backend
-        // temporarily fails.
-
         renderDocumentLibrary();
 
 
         return getChatDocuments(
             currentChatId
         );
+
     }
+
 }
 
 
@@ -1439,6 +1865,7 @@ function addUploadedDocument(
         );
 
         return;
+
     }
 
 
@@ -1477,6 +1904,7 @@ function addUploadedDocument(
         documents.push(
             documentData
         );
+
     }
 
 
@@ -1487,6 +1915,7 @@ function addUploadedDocument(
 
 
     renderDocumentLibrary();
+
 }
 
 
@@ -1503,6 +1932,7 @@ async function ensureCurrentChat() {
     ) {
 
         return currentChatId;
+
     }
 
 
@@ -1523,15 +1953,13 @@ async function ensureCurrentChat() {
         throw new Error(
             "Could not create a new chat."
         );
+
     }
 
 
     currentChatId =
         result.chat_id;
 
-
-    // Use chats.js persistence function
-    // when available.
 
     if (
         typeof saveCurrentChatId ===
@@ -1548,6 +1976,7 @@ async function ensureCurrentChat() {
             "rag_current_chat_id",
             currentChatId
         );
+
     }
 
 
@@ -1572,11 +2001,14 @@ async function ensureCurrentChat() {
                 "Could not refresh chats:",
                 error
             );
+
         }
+
     }
 
 
     return currentChatId;
+
 }
 
 
@@ -1602,9 +2034,9 @@ function initializeUploadUI() {
         $("fileInput");
 
 
-    // =====================================================
-    // OPEN UPLOAD PANEL
-    // =====================================================
+    // -----------------------------------------------------
+    // OPEN
+    // -----------------------------------------------------
 
     if (
         uploadBtn &&
@@ -1621,12 +2053,13 @@ function initializeUploadUI() {
 
             }
         );
+
     }
 
 
-    // =====================================================
-    // CLOSE UPLOAD PANEL
-    // =====================================================
+    // -----------------------------------------------------
+    // CLOSE
+    // -----------------------------------------------------
 
     if (
         closeUploadBtn &&
@@ -1645,12 +2078,9 @@ function initializeUploadUI() {
 
             }
         );
+
     }
 
-
-    // =====================================================
-    // CHECK FILE INPUT
-    // =====================================================
 
     if (
         !chooseFilesBtn ||
@@ -1662,12 +2092,13 @@ function initializeUploadUI() {
         );
 
         return;
+
     }
 
 
-    // =====================================================
+    // -----------------------------------------------------
     // CHOOSE FILES
-    // =====================================================
+    // -----------------------------------------------------
 
     chooseFilesBtn.addEventListener(
         "click",
@@ -1679,9 +2110,9 @@ function initializeUploadUI() {
     );
 
 
-    // =====================================================
+    // -----------------------------------------------------
     // FILE SELECTED
-    // =====================================================
+    // -----------------------------------------------------
 
     fileInput.addEventListener(
         "change",
@@ -1698,6 +2129,7 @@ function initializeUploadUI() {
             ) {
 
                 return;
+
             }
 
 
@@ -1706,6 +2138,7 @@ function initializeUploadUI() {
             ) {
 
                 return;
+
             }
 
 
@@ -1723,24 +2156,19 @@ function initializeUploadUI() {
                     0;
 
 
-                // =================================================
-                // ENSURE CHAT
-                // =================================================
-
                 await ensureCurrentChat();
 
 
-                if (!currentChatId) {
+                if (
+                    !currentChatId
+                ) {
 
                     throw new Error(
                         "No active chat available for upload."
                     );
+
                 }
 
-
-                // =================================================
-                // UPLOAD EACH FILE
-                // =================================================
 
                 for (
                     const file of files
@@ -1748,14 +2176,6 @@ function initializeUploadUI() {
 
                     setStatus(
                         `Uploading ${file.name}...`
-                    );
-
-
-                    console.log(
-                        "Uploading:",
-                        file.name,
-                        "Chat:",
-                        currentChatId
                     );
 
 
@@ -1772,10 +2192,6 @@ function initializeUploadUI() {
                     );
 
 
-                    // =================================================
-                    // SHOW IMMEDIATELY
-                    // =================================================
-
                     addUploadedDocument(
                         result,
                         file
@@ -1783,24 +2199,12 @@ function initializeUploadUI() {
 
 
                     uploadedCount++;
+
                 }
 
 
-                // =================================================
-                // IMPORTANT:
-                //
-                // NOW GET FILES DIRECTLY FROM BACKEND.
-                //
-                // This guarantees that the document shown in UI
-                // is actually associated with this chat.
-                // =================================================
-
                 await refreshCurrentChatDocuments();
 
-
-                // =================================================
-                // SUCCESS
-                // =================================================
 
                 if (
                     uploadedCount === 1
@@ -1815,12 +2219,9 @@ function initializeUploadUI() {
                     setStatus(
                         `${uploadedCount} documents uploaded successfully.`
                     );
+
                 }
 
-
-                // =================================================
-                // CLOSE PANEL
-                // =================================================
 
                 if (
                     uploadPanel
@@ -1829,12 +2230,9 @@ function initializeUploadUI() {
                     uploadPanel.classList.remove(
                         "open"
                     );
+
                 }
 
-
-                // =================================================
-                // REFRESH SIDEBAR
-                // =================================================
 
                 if (
                     typeof loadChats ===
@@ -1851,7 +2249,9 @@ function initializeUploadUI() {
                             "Could not refresh chats after upload:",
                             error
                         );
+
                     }
+
                 }
 
 
@@ -1880,14 +2280,14 @@ function initializeUploadUI() {
                     false;
 
 
-                // Allow selecting same file again.
-
                 fileInput.value =
                     "";
+
             }
 
         }
     );
+
 }
 
 
@@ -1914,12 +2314,13 @@ function initializeQuestionInput() {
         );
 
         return;
+
     }
 
 
-    // =====================================================
+    // -----------------------------------------------------
     // SEND BUTTON
-    // =====================================================
+    // -----------------------------------------------------
 
     sendBtn.addEventListener(
         "click",
@@ -1931,9 +2332,9 @@ function initializeQuestionInput() {
     );
 
 
-    // =====================================================
-    // ENTER KEY
-    // =====================================================
+    // -----------------------------------------------------
+    // ENTER
+    // -----------------------------------------------------
 
     input.addEventListener(
         "keydown",
@@ -1948,15 +2349,16 @@ function initializeQuestionInput() {
                 event.preventDefault();
 
                 await sendQuestion();
+
             }
 
         }
     );
 
 
-    // =====================================================
+    // -----------------------------------------------------
     // AUTO RESIZE
-    // =====================================================
+    // -----------------------------------------------------
 
     input.addEventListener(
         "input",
@@ -1974,141 +2376,19 @@ function initializeQuestionInput() {
 
         }
     );
+
 }
 
 
 // =========================================================
-// SEND QUESTION
+// AUTOMATIC CHAT NAME
 // =========================================================
 
-async function sendQuestion() {
-
-    const input =
-        $("questionInput");
-
-    const sendBtn =
-        $("sendBtn");
-
-
-    // =====================================================
-    // BASIC VALIDATION
-    // =====================================================
-
-    if (!input) {
-        return;
-    }
-
-
-    const question =
-        input.value.trim();
-
-
-    if (!question) {
-        return;
-    }
-
-
-    // =====================================================
-    // DUPLICATE PROTECTION
-    // =====================================================
-
-    if (isAsking) {
-
-        console.log(
-            "Question already being processed."
-        );
-
-        return;
-    }
-
+function autoNameCurrentChat(
+    question
+) {
 
     try {
-
-        // =================================================
-        // ENSURE CHAT EXISTS
-        // =================================================
-
-        await ensureCurrentChat();
-
-
-        if (!currentChatId) {
-
-            throw new Error(
-                "No active chat available."
-            );
-        }
-
-
-        // =================================================
-        // LOCK REQUEST
-        // =================================================
-
-        isAsking =
-            true;
-
-
-        if (sendBtn) {
-
-            sendBtn.disabled =
-                true;
-        }
-
-
-        input.disabled =
-            true;
-
-
-        // =================================================
-        // HIDE EMPTY STATE
-        // =================================================
-
-        hideEmptyState();
-
-
-        // =================================================
-        // CAPTURE QUESTION
-        // =================================================
-
-        const submittedQuestion =
-            question;
-
-
-        // =================================================
-        // CLEAR INPUT IMMEDIATELY
-        // =================================================
-
-        input.value =
-            "";
-
-
-        input.style.height =
-            "auto";
-
-
-        // =================================================
-        // SHOW USER MESSAGE
-        // =================================================
-
-        renderMessage(
-            "user",
-            submittedQuestion
-        );
-
-
-        // =================================================
-        // AUTOMATIC CHAT NAME
-        // =================================================
-        //
-        // We use the chats.js function.
-        //
-        // IMPORTANT:
-        // We intentionally DO NOT await it.
-        //
-        // The actual question should not be blocked
-        // by the title update.
-        //
-        // Manual rename is protected inside autoNameChat().
-        // =================================================
 
         const chatsModule =
             window.RAGChats;
@@ -2123,7 +2403,7 @@ async function sendQuestion() {
             chatsModule
                 .autoNameChat(
                     currentChatId,
-                    submittedQuestion
+                    question
                 )
                 .catch(
                     error => {
@@ -2132,105 +2412,133 @@ async function sendQuestion() {
                             "Automatic chat naming failed:",
                             error
                         );
+
                     }
                 );
+
+        }
+
+    } catch (error) {
+
+        console.warn(
+            "Could not auto-name chat:",
+            error
+        );
+
+    }
+
+}
+
+
+// =========================================================
+// SEND NORMAL DOCUMENT QUESTION
+// =========================================================
+
+async function sendQuestion() {
+
+    const input =
+        $("questionInput");
+
+    const sendBtn =
+        $("sendBtn");
+
+
+    if (!input) {
+
+        return;
+
+    }
+
+
+    const question =
+        input.value.trim();
+
+
+    if (!question) {
+
+        return;
+
+    }
+
+
+    if (
+        isAsking ||
+        isRunningAction
+    ) {
+
+        return;
+
+    }
+
+
+    try {
+
+        await ensureCurrentChat();
+
+
+        if (
+            !currentChatId
+        ) {
+
+            throw new Error(
+                "No active chat available."
+            );
+
         }
 
 
-        // =================================================
-        // ASK BACKEND
-        // =================================================
-        //
-        // IMPORTANT:
-        //
-        // DO NOT call saveChatMessage() here.
-        //
-        // The backend /ask endpoint is already responsible
-        // for saving the question and answer.
-        // =================================================
-
-        if (
-    currentYouTubeUrl &&
-    extractYouTubeVideoId(
-        currentYouTubeUrl
-    )
-) {
-
-    setStatus(
-        "Analyzing YouTube video..."
-    );
-
-} else {
-
-    setStatus(
-        "Thinking..."
-    );
-}
+        isAsking =
+            true;
 
 
-        // =========================================================
-// CHOOSE QUESTION ENGINE
-// =========================================================
-//
-// If a YouTube video is currently loaded,
-// use Level-2 multimodal Gemini.
-//
-// Otherwise use normal document RAG.
-//
-// IMPORTANT:
-// Do NOT call saveChatMessage() here.
-// The backend saves the user question and answer.
-// =========================================================
+        if (sendBtn) {
 
-let response;
+            sendBtn.disabled =
+                true;
+
+        }
 
 
-if (
-    currentYouTubeUrl &&
-    extractYouTubeVideoId(
-        currentYouTubeUrl
-    )
-) {
-
-    // =====================================================
-    // YOUTUBE LEVEL 2 MULTIMODAL
-    // =====================================================
-
-    console.log(
-        "🎬 Sending question to YouTube multimodal backend..."
-    );
+        input.disabled =
+            true;
 
 
-    setStatus(
-        "Analyzing YouTube video..."
-    );
+        hideEmptyState();
 
 
-    response =
-        await askYouTubeMultimodal(
-            currentChatId,
-            currentYouTubeUrl,
+        const submittedQuestion =
+            question;
+
+
+        input.value =
+            "";
+
+
+        input.style.height =
+            "auto";
+
+
+        renderMessage(
+            "user",
             submittedQuestion
         );
 
 
-} else {
-
-    // =====================================================
-    // NORMAL DOCUMENT RAG
-    // =====================================================
-
-    console.log(
-        "📄 Sending question to document RAG..."
-    );
-
-
-    response =
-        await askDocuments(
-            currentChatId,
+        autoNameCurrentChat(
             submittedQuestion
         );
-}
+
+
+        setStatus(
+            "Thinking..."
+        );
+
+
+        const response =
+            await askDocuments(
+                currentChatId,
+                submittedQuestion
+            );
 
 
         console.log(
@@ -2239,10 +2547,6 @@ if (
         );
 
 
-        // =================================================
-        // EXTRACT ANSWER
-        // =================================================
-
         const answer =
             response?.answer ||
             response?.response ||
@@ -2250,19 +2554,11 @@ if (
             "No answer returned.";
 
 
-        // =================================================
-        // EXTRACT SOURCES
-        // =================================================
-
         const sources =
             response?.sources ||
             response?.citations ||
             [];
 
-
-        // =================================================
-        // RENDER SOURCES
-        // =================================================
 
         if (
             Array.isArray(
@@ -2273,25 +2569,15 @@ if (
             renderSources(
                 sources
             );
+
         }
 
-
-        // =================================================
-        // SHOW ASSISTANT MESSAGE
-        // =================================================
 
         renderMessage(
             "assistant",
             answer
         );
 
-
-        // =================================================
-        // REFRESH SIDEBAR
-        // =================================================
-        //
-        // This gets the latest title from backend.
-        // =================================================
 
         if (
             typeof loadChats ===
@@ -2308,13 +2594,11 @@ if (
                     "Could not refresh chats:",
                     error
                 );
+
             }
+
         }
 
-
-        // =================================================
-        // RESTORE ACTIVE CHAT STYLE
-        // =================================================
 
         if (
             typeof updateActiveChatStyles ===
@@ -2331,12 +2615,9 @@ if (
 
             window.RAGChats
                 .highlightCurrentChat();
+
         }
 
-
-        // =================================================
-        // CLEAR STATUS
-        // =================================================
 
         setStatus("");
 
@@ -2361,10 +2642,6 @@ if (
 
     } finally {
 
-        // =================================================
-        // UNLOCK
-        // =================================================
-
         isAsking =
             false;
 
@@ -2373,6 +2650,7 @@ if (
 
             sendBtn.disabled =
                 false;
+
         }
 
 
@@ -2382,8 +2660,731 @@ if (
                 false;
 
             input.focus();
+
         }
+
     }
+
+}
+
+
+// =========================================================
+// ACTION RESULT HELPERS
+// =========================================================
+
+function getResponseAnswer(
+    response,
+    fallback = ""
+) {
+
+    if (
+        response === undefined ||
+        response === null
+    ) {
+
+        return fallback;
+
+    }
+
+
+    if (
+        typeof response ===
+        "string"
+    ) {
+
+        return response;
+
+    }
+
+
+    return (
+        response.answer ||
+        response.response ||
+        response.content ||
+        response.text ||
+        fallback
+    );
+
+}
+
+
+// =========================================================
+// FORMAT QUIZ RESULT
+// =========================================================
+
+function formatQuizResult(
+    response
+) {
+
+    const quiz =
+        response?.quiz ||
+        response?.data ||
+        response;
+
+
+    if (
+        !quiz ||
+        typeof quiz !==
+        "object"
+    ) {
+
+        return getResponseAnswer(
+            response,
+            "Quiz generated successfully."
+        );
+
+    }
+
+
+    const questions =
+        Array.isArray(
+            quiz.questions
+        )
+            ? quiz.questions
+            : [];
+
+
+    if (
+        !questions.length
+    ) {
+
+        return getResponseAnswer(
+            response,
+            "Quiz generated successfully."
+        );
+
+    }
+
+
+    let output =
+        "## 🎯 Generated Quiz\n\n";
+
+
+    questions.forEach(
+        (question, index) => {
+
+            const questionText =
+                question.question ||
+                question.text ||
+                `Question ${index + 1}`;
+
+
+            output +=
+                `### ${index + 1}. ${questionText}\n\n`;
+
+
+            const options =
+                question.options ||
+                question.choices ||
+                [];
+
+
+            if (
+                Array.isArray(options)
+            ) {
+
+                options.forEach(
+                    (option, optionIndex) => {
+
+                        const letter =
+                            String.fromCharCode(
+                                65 + optionIndex
+                            );
+
+
+                        output +=
+                            `- ${letter}. ${option}\n`;
+
+                    }
+                );
+
+            }
+
+
+            if (
+                question.answer ||
+                question.correct_answer
+            ) {
+
+                output +=
+                    `\n**Answer:** ${
+                        question.answer ||
+                        question.correct_answer
+                    }\n`;
+
+            }
+
+
+            if (
+                question.explanation
+            ) {
+
+                output +=
+                    `**Explanation:** ${question.explanation}\n`;
+
+            }
+
+
+            output +=
+                "\n";
+
+        }
+    );
+
+
+    return output;
+
+}
+
+
+// =========================================================
+// FORMAT FLASHCARD RESULT
+// =========================================================
+
+function formatFlashcardResult(
+    response
+) {
+
+    const data =
+        response?.flashcards
+            ? response
+            : (
+                response?.data ||
+                response
+            );
+
+
+    const cards =
+        Array.isArray(
+            data?.flashcards
+        )
+            ? data.flashcards
+            : [];
+
+
+    if (
+        !cards.length
+    ) {
+
+        return getResponseAnswer(
+            response,
+            "Flashcards generated successfully."
+        );
+
+    }
+
+
+    let output =
+        "## 📑 Flashcards\n\n";
+
+
+    cards.forEach(
+        (card, index) => {
+
+            const front =
+                card.front ||
+                card.question ||
+                "";
+
+
+            const back =
+                card.back ||
+                card.answer ||
+                "";
+
+
+            output +=
+                `### Card ${index + 1}\n\n`;
+
+
+            output +=
+                `**Question:** ${front}\n\n`;
+
+
+            output +=
+                `**Answer:** ${back}\n\n`;
+
+
+            if (
+                card.source
+            ) {
+
+                output +=
+                    `📚 **Source:** ${card.source}\n\n`;
+
+            }
+
+        }
+    );
+
+
+    return output;
+
+}
+
+
+// =========================================================
+// RUN SUMMARIZE
+// =========================================================
+
+async function runSummarizeAction() {
+
+    await ensureCurrentChat();
+
+
+    if (
+        !currentChatId
+    ) {
+
+        throw new Error(
+            "No active chat available."
+        );
+
+    }
+
+
+    const documents =
+        await refreshCurrentChatDocuments();
+
+
+    if (
+        !documents.length
+    ) {
+
+        throw new Error(
+            "Please upload at least one document first."
+        );
+
+    }
+
+
+    setStatus(
+        "📄 Reading all documents and generating summary..."
+    );
+
+
+    const response =
+        await summarizeDocuments(
+            currentChatId,
+            "Medium"
+        );
+
+
+    const answer =
+        getResponseAnswer(
+            response,
+            "Summary generated successfully."
+        );
+
+
+    const sources =
+        response?.sources ||
+        response?.citations ||
+        [];
+
+
+    renderMessage(
+        "assistant",
+        answer
+    );
+
+
+    renderSources(
+        sources
+    );
+
+
+    return response;
+
+}
+
+
+// =========================================================
+// RUN COMPARE
+// =========================================================
+
+async function runCompareAction() {
+
+    await ensureCurrentChat();
+
+
+    if (
+        !currentChatId
+    ) {
+
+        throw new Error(
+            "No active chat available."
+        );
+
+    }
+
+
+    const documents =
+        await refreshCurrentChatDocuments();
+
+
+    if (
+        documents.length < 2
+    ) {
+
+        throw new Error(
+            "Please upload at least two documents to compare."
+        );
+
+    }
+
+
+    const files =
+        documents
+            .map(
+                document =>
+                    document.file_name ||
+                    document.filename ||
+                    document.name
+            )
+            .filter(
+                Boolean
+            );
+
+
+    if (
+        files.length < 2
+    ) {
+
+        throw new Error(
+            "Could not determine the uploaded document names."
+        );
+
+    }
+
+
+    setStatus(
+        "🔄 Comparing all uploaded documents..."
+    );
+
+
+    const response =
+        await compareDocuments(
+            currentChatId,
+            files
+        );
+
+
+    const answer =
+        getResponseAnswer(
+            response,
+            "Documents compared successfully."
+        );
+
+
+    const sources =
+        response?.sources ||
+        response?.citations ||
+        [];
+
+
+    renderMessage(
+        "assistant",
+        answer
+    );
+
+
+    renderSources(
+        sources
+    );
+
+
+    return response;
+
+}
+
+
+// =========================================================
+// RUN QUIZ
+// =========================================================
+
+async function runQuizAction() {
+
+    await ensureCurrentChat();
+
+
+    if (
+        !currentChatId
+    ) {
+
+        throw new Error(
+            "No active chat available."
+        );
+
+    }
+
+
+    const documents =
+        await refreshCurrentChatDocuments();
+
+
+    if (
+        documents.length === 0
+    ) {
+
+        throw new Error(
+            "Please upload at least one document first."
+        );
+
+    }
+
+
+    setStatus(
+        "🎯 Reading your documents and generating quiz..."
+    );
+
+
+    const response =
+        await generateDocumentQuiz(
+            currentChatId,
+            5,
+            "Medium"
+        );
+
+
+    const answer =
+        formatQuizResult(
+            response
+        );
+
+
+    const sources =
+        response?.sources ||
+        response?.citations ||
+        [];
+
+
+    renderMessage(
+        "assistant",
+        answer
+    );
+
+
+    renderSources(
+        sources
+    );
+
+
+    return response;
+
+}
+
+
+// =========================================================
+// RUN FLASHCARDS
+// =========================================================
+
+async function runFlashcardsAction() {
+
+    await ensureCurrentChat();
+
+
+    if (
+        !currentChatId
+    ) {
+
+        throw new Error(
+            "No active chat available."
+        );
+
+    }
+
+
+    const documents =
+        await refreshCurrentChatDocuments();
+
+
+    if (
+        documents.length === 0
+    ) {
+
+        throw new Error(
+            "Please upload at least one document first."
+        );
+
+    }
+
+
+    setStatus(
+        "📑 Reading your documents and creating flashcards..."
+    );
+
+
+    const response =
+        await generateDocumentFlashcards(
+            currentChatId,
+            10,
+            "Medium"
+        );
+
+
+    const answer =
+        formatFlashcardResult(
+            response
+        );
+
+
+    const sources =
+        response?.sources ||
+        response?.citations ||
+        [];
+
+
+    renderMessage(
+        "assistant",
+        answer
+    );
+
+
+    renderSources(
+        sources
+    );
+
+
+    return response;
+
+}
+
+
+// =========================================================
+// RUN SELECTED ACTION
+// =========================================================
+
+async function runDocumentAction(
+    action
+) {
+
+    if (
+        isRunningAction ||
+        isAsking ||
+        isUploading
+    ) {
+
+        return;
+
+    }
+
+
+    isRunningAction =
+        true;
+
+
+    try {
+
+        hideEmptyState();
+
+        hideSources();
+
+
+        switch (action) {
+
+            case "summarize":
+
+                await runSummarizeAction();
+
+                break;
+
+
+            case "compare":
+
+                await runCompareAction();
+
+                break;
+
+
+            case "quiz":
+
+                await runQuizAction();
+
+                break;
+
+
+            case "flashcards":
+
+                await runFlashcardsAction();
+
+                break;
+
+
+            default:
+
+                throw new Error(
+                    "Unknown document action."
+                );
+
+        }
+
+
+        if (
+            typeof loadChats ===
+            "function"
+        ) {
+
+            try {
+
+                await loadChats();
+
+            } catch (error) {
+
+                console.warn(
+                    "Could not refresh chats:",
+                    error
+                );
+
+            }
+
+        }
+
+
+        if (
+            typeof updateActiveChatStyles ===
+            "function"
+        ) {
+
+            updateActiveChatStyles();
+
+        } else if (
+            window.RAGChats &&
+            typeof window.RAGChats.highlightCurrentChat ===
+                "function"
+        ) {
+
+            window.RAGChats
+                .highlightCurrentChat();
+
+        }
+
+
+        setStatus("");
+
+
+    } catch (error) {
+
+        console.error(
+            `Action "${action}" failed:`,
+            error
+        );
+
+
+        setStatus(
+            error.message ||
+            `Could not complete ${action}.`,
+            true
+        );
+
+
+    } finally {
+
+        isRunningAction =
+            false;
+
+    }
+
 }
 
 
@@ -2399,12 +3400,34 @@ function initializeActionButtons() {
         );
 
 
+    if (
+        !buttons.length
+    ) {
+
+        console.warn(
+            "No action buttons found."
+        );
+
+        return;
+
+    }
+
+
     buttons.forEach(
         button => {
 
             button.addEventListener(
                 "click",
-                () => {
+                async () => {
+
+                    if (
+                        isRunningAction
+                    ) {
+
+                        return;
+
+                    }
+
 
                     buttons.forEach(
                         item => {
@@ -2427,7 +3450,38 @@ function initializeActionButtons() {
                         "ask";
 
 
-                    handleActionChange(
+                    // -------------------------------------------------
+                    // ASK
+                    // -------------------------------------------------
+
+                    if (
+                        currentAction ===
+                        "ask"
+                    ) {
+
+                        setStatus("");
+
+                        const input =
+                            $("questionInput");
+
+
+                        if (input) {
+
+                            input.focus();
+
+                        }
+
+
+                        return;
+
+                    }
+
+
+                    // -------------------------------------------------
+                    // DOCUMENT ACTION
+                    // -------------------------------------------------
+
+                    await runDocumentAction(
                         currentAction
                     );
 
@@ -2436,71 +3490,12 @@ function initializeActionButtons() {
 
         }
     );
+
 }
 
 
 // =========================================================
-// ACTION CHANGE
-// =========================================================
-
-function handleActionChange(
-    action
-) {
-
-    switch (action) {
-
-        case "ask":
-
-            setStatus("");
-
-            break;
-
-
-        case "compare":
-
-            setStatus(
-                "Compare Documents will be connected next."
-            );
-
-            break;
-
-
-        case "summarize":
-
-            setStatus(
-                "Summarize will be connected next."
-            );
-
-            break;
-
-
-        case "quiz":
-
-            setStatus(
-                "Generate Quiz will be connected next."
-            );
-
-            break;
-
-
-        case "flashcards":
-
-            setStatus(
-                "Flashcards will be connected next."
-            );
-
-            break;
-
-
-        default:
-
-            setStatus("");
-    }
-}
-
-
-// =========================================================
-// YOUTUBE
+// YOUTUBE VIDEO ID
 // =========================================================
 
 function extractYouTubeVideoId(
@@ -2508,7 +3503,9 @@ function extractYouTubeVideoId(
 ) {
 
     if (!url) {
+
         return null;
+
     }
 
 
@@ -2518,9 +3515,9 @@ function extractYouTubeVideoId(
             new URL(url);
 
 
-        // =====================================================
-        // youtube.com/watch?v=...
-        // =====================================================
+        // -----------------------------------------------------
+        // youtube.com/watch?v=
+        // -----------------------------------------------------
 
         if (
             parsed.hostname.includes(
@@ -2537,13 +3534,15 @@ function extractYouTubeVideoId(
             if (id) {
 
                 return id;
+
             }
+
         }
 
 
-        // =====================================================
-        // youtu.be/VIDEO_ID
-        // =====================================================
+        // -----------------------------------------------------
+        // youtu.be/
+        // -----------------------------------------------------
 
         if (
             parsed.hostname.includes(
@@ -2557,12 +3556,13 @@ function extractYouTubeVideoId(
                     ""
                 )
                 .split("?")[0];
+
         }
 
 
-        // =====================================================
-        // youtube.com/embed/VIDEO_ID
-        // =====================================================
+        // -----------------------------------------------------
+        // youtube.com/embed/
+        // -----------------------------------------------------
 
         if (
             parsed.pathname.startsWith(
@@ -2576,6 +3576,7 @@ function extractYouTubeVideoId(
                 )[1]
                 ?.split("/")[0] ||
                 null;
+
         }
 
 
@@ -2585,10 +3586,12 @@ function extractYouTubeVideoId(
             "Invalid YouTube URL:",
             error
         );
+
     }
 
 
     return null;
+
 }
 
 
@@ -2613,6 +3616,7 @@ function showYouTubeVideo(
     ) {
 
         return;
+
     }
 
 
@@ -2630,6 +3634,7 @@ function showYouTubeVideo(
         );
 
         return;
+
     }
 
 
@@ -2649,6 +3654,7 @@ function showYouTubeVideo(
     setStatus(
         "YouTube video loaded."
     );
+
 }
 
 
@@ -2669,6 +3675,7 @@ function hideYouTubeVideo() {
 
         iframe.src =
             "";
+
     }
 
 
@@ -2681,7 +3688,9 @@ function hideYouTubeVideo() {
 
         panel.style.display =
             "none";
+
     }
+
 }
 
 
@@ -2689,237 +3698,7 @@ function hideYouTubeVideo() {
 // YOUTUBE UI
 // =========================================================
 
-// =========================================================
-// YOUTUBE — LEVEL 2 MULTIMODAL
-// =========================================================
-
-
-// =========================================================
-// EXTRACT YOUTUBE VIDEO ID
-// =========================================================
-
-function extractYouTubeVideoId(
-    url
-) {
-
-    if (!url) {
-        return null;
-    }
-
-
-    try {
-
-        const parsed =
-            new URL(url);
-
-
-        // =====================================================
-        // youtube.com/watch?v=...
-        // =====================================================
-
-        if (
-            parsed.hostname.includes(
-                "youtube.com"
-            )
-        ) {
-
-            const id =
-                parsed.searchParams.get(
-                    "v"
-                );
-
-
-            if (id) {
-
-                return id;
-            }
-        }
-
-
-        // =====================================================
-        // youtu.be/VIDEO_ID
-        // =====================================================
-
-        if (
-            parsed.hostname.includes(
-                "youtu.be"
-            )
-        ) {
-
-            return parsed.pathname
-                .replace(
-                    "/",
-                    ""
-                )
-                .split("?")[0];
-        }
-
-
-        // =====================================================
-        // youtube.com/embed/VIDEO_ID
-        // =====================================================
-
-        if (
-            parsed.pathname.startsWith(
-                "/embed/"
-            )
-        ) {
-
-            return parsed.pathname
-                .split(
-                    "/embed/"
-                )[1]
-                ?.split("/")[0] ||
-                null;
-        }
-
-
-    } catch (error) {
-
-        console.warn(
-            "Invalid YouTube URL:",
-            error
-        );
-    }
-
-
-    return null;
-}
-
-
-// =========================================================
-// SHOW YOUTUBE VIDEO
-// =========================================================
-
-function showYouTubeVideo(
-    url
-) {
-
-    const panel =
-        $("youtubePanel");
-
-    const iframe =
-        $("youtubePlayer");
-
-
-    if (
-        !panel ||
-        !iframe
-    ) {
-
-        console.warn(
-            "YouTube panel/player not found."
-        );
-
-        return;
-    }
-
-
-    const videoId =
-        extractYouTubeVideoId(
-            url
-        );
-
-
-    if (!videoId) {
-
-        setStatus(
-            "Please enter a valid YouTube URL.",
-            true
-        );
-
-        return;
-    }
-
-
-    iframe.src =
-        `https://www.youtube.com/embed/${videoId}?enablejsapi=1`;
-
-
-    panel.classList.remove(
-        "hidden"
-    );
-
-
-    panel.style.display =
-        "block";
-
-
-    setStatus(
-        "YouTube video loaded. Ask a question about the video."
-    );
-}
-
-
-// =========================================================
-// HIDE YOUTUBE VIDEO
-// =========================================================
-
-function hideYouTubeVideo() {
-
-    const panel =
-        $("youtubePanel");
-
-    const iframe =
-        $("youtubePlayer");
-
-
-    if (iframe) {
-
-        iframe.src =
-            "";
-    }
-
-
-    if (panel) {
-
-        panel.classList.add(
-            "hidden"
-        );
-
-
-        panel.style.display =
-            "none";
-    }
-
-
-    // ---------------------------------------------------------
-    // IMPORTANT:
-    // Clear active YouTube mode.
-    // ---------------------------------------------------------
-
-    currentYouTubeUrl =
-        "";
-
-
-    const input =
-        $("youtubeUrl");
-
-
-    if (input) {
-
-        input.value =
-            "";
-    }
-
-
-    setStatus("");
-}
-
-
-// =========================================================
-// ANALYZE YOUTUBE VIDEO
-// =========================================================
-//
-// This does NOT consume a Gemini request.
-//
-// It only validates and loads the video.
-//
-// The actual Gemini request happens when the user
-// asks a question through sendQuestion().
-// =========================================================
-
-async function initializeYouTubeUI() {
+function initializeYouTubeUI() {
 
     const closeBtn =
         $("closeYoutubeBtn");
@@ -2931,10 +3710,6 @@ async function initializeYouTubeUI() {
         $("analyzeYoutubeBtn");
 
 
-    // =====================================================
-    // CLOSE BUTTON
-    // =====================================================
-
     if (closeBtn) {
 
         closeBtn.addEventListener(
@@ -2945,12 +3720,9 @@ async function initializeYouTubeUI() {
 
             }
         );
+
     }
 
-
-    // =====================================================
-    // ANALYZE / LOAD BUTTON
-    // =====================================================
 
     if (
         analyzeBtn &&
@@ -2965,10 +3737,6 @@ async function initializeYouTubeUI() {
                     input.value.trim();
 
 
-                // -------------------------------------------------
-                // VALIDATE URL
-                // -------------------------------------------------
-
                 if (!url) {
 
                     setStatus(
@@ -2977,6 +3745,7 @@ async function initializeYouTubeUI() {
                     );
 
                     return;
+
                 }
 
 
@@ -2994,98 +3763,152 @@ async function initializeYouTubeUI() {
                     );
 
                     return;
+
                 }
 
-
-                // -------------------------------------------------
-                // ENSURE CHAT
-                // -------------------------------------------------
 
                 try {
 
                     await ensureCurrentChat();
 
+
+                    showYouTubeVideo(
+                        url
+                    );
+
+
+                    // -------------------------------------------------
+                    // YouTube UI currently loads the video.
+                    //
+                    // Actual multimodal question is sent through
+                    // askYouTubeMultimodal().
+                    // -------------------------------------------------
+
+                    setStatus(
+                        "YouTube video loaded."
+                    );
+
+
                 } catch (error) {
 
                     console.error(
-                        "Could not create chat for YouTube:",
+                        "YouTube initialization failed:",
                         error
                     );
 
 
                     setStatus(
                         error.message ||
-                        "Could not create a chat.",
+                        "Could not load YouTube video.",
                         true
                     );
 
-                    return;
                 }
 
-
-                if (!currentChatId) {
-
-                    setStatus(
-                        "No active chat available.",
-                        true
-                    );
-
-                    return;
-                }
-
-
-                // -------------------------------------------------
-                // STORE ACTIVE YOUTUBE URL
-                // -------------------------------------------------
-
-                currentYouTubeUrl =
-                    url;
-
-
-                // -------------------------------------------------
-                // SHOW VIDEO
-                // -------------------------------------------------
-
-                showYouTubeVideo(
-                    url
-                );
-
-
-                // -------------------------------------------------
-                // REFRESH CHAT SIDEBAR
-                // -------------------------------------------------
-
-                if (
-                    typeof loadChats ===
-                    "function"
-                ) {
-
-                    try {
-
-                        await loadChats();
-
-                    } catch (error) {
-
-                        console.warn(
-                            "Could not refresh chats after YouTube load:",
-                            error
-                        );
-                    }
-                }
-
-
-                setStatus(
-                    "YouTube video loaded. Now ask your question below."
-                );
-
-
-                console.log(
-                    "🎬 Active YouTube video:",
-                    currentYouTubeUrl
-                );
             }
         );
+
     }
+
+}
+
+
+// =========================================================
+// YOUTUBE MULTIMODAL ASK
+// =========================================================
+//
+// This function is available for the UI/question flow.
+//
+// Backend:
+//
+// POST
+// /api/chats/{chat_id}/youtube/ask
+//
+// =========================================================
+
+async function askYouTubeQuestion(
+    videoUrl,
+    question
+) {
+
+    if (
+        !videoUrl ||
+        !videoUrl.trim()
+    ) {
+
+        throw new Error(
+            "YouTube video URL is required."
+        );
+
+    }
+
+
+    if (
+        !question ||
+        !question.trim()
+    ) {
+
+        throw new Error(
+            "Question cannot be empty."
+        );
+
+    }
+
+
+    await ensureCurrentChat();
+
+
+    if (
+        !currentChatId
+    ) {
+
+        throw new Error(
+            "No active chat available."
+        );
+
+    }
+
+
+    const response =
+        await askYouTubeMultimodal(
+            currentChatId,
+            videoUrl.trim(),
+            question.trim()
+        );
+
+
+    const answer =
+        getResponseAnswer(
+            response,
+            "No YouTube answer returned."
+        );
+
+
+    const sources =
+        response?.sources ||
+        response?.citations ||
+        [];
+
+
+    renderMessage(
+        "user",
+        question.trim()
+    );
+
+
+    renderMessage(
+        "assistant",
+        answer
+    );
+
+
+    renderSources(
+        sources
+    );
+
+
+    return response;
+
 }
 
 
@@ -3107,6 +3930,7 @@ async function initializeApiHealth() {
             );
 
             return;
+
         }
 
 
@@ -3135,6 +3959,7 @@ async function initializeApiHealth() {
                 "Unexpected health response:",
                 result
             );
+
         }
 
 
@@ -3149,7 +3974,9 @@ async function initializeApiHealth() {
         console.warn(
             "Continuing application initialization..."
         );
+
     }
+
 }
 
 
@@ -3159,15 +3986,13 @@ async function initializeApiHealth() {
 
 async function restoreSavedChat() {
 
-    currentYouTubeUrl = "";
-    hideYouTubeVideo();
-
-    let savedChatId = null;
+    let savedChatId =
+        null;
 
 
-    // =====================================================
+    // -----------------------------------------------------
     // Prefer chats.js helper
-    // =====================================================
+    // -----------------------------------------------------
 
     if (
         window.RAGChats &&
@@ -3185,6 +4010,7 @@ async function restoreSavedChat() {
             localStorage.getItem(
                 "rag_current_chat_id"
             );
+
     }
 
 
@@ -3195,6 +4021,7 @@ async function restoreSavedChat() {
         );
 
         return;
+
     }
 
 
@@ -3205,10 +4032,6 @@ async function restoreSavedChat() {
 
 
     try {
-
-        // =================================================
-        // Use chats.js selectChat
-        // =================================================
 
         if (
             window.RAGChats &&
@@ -3228,10 +4051,9 @@ async function restoreSavedChat() {
 
 
             return;
+
         }
 
-
-        // Fallback for older loading order.
 
         if (
             typeof selectChat ===
@@ -3242,7 +4064,9 @@ async function restoreSavedChat() {
                 savedChatId
             );
 
+
             return;
+
         }
 
 
@@ -3259,8 +4083,6 @@ async function restoreSavedChat() {
         );
 
 
-        // Remove only invalid saved ID.
-
         localStorage.removeItem(
             "rag_current_chat_id"
         );
@@ -3276,8 +4098,11 @@ async function restoreSavedChat() {
                 .setCurrentChatId(
                     null
                 );
+
         }
+
     }
+
 }
 
 
@@ -3295,14 +4120,6 @@ async function initializeApp() {
     // =====================================================
     // CHAT CONTROLS
     // =====================================================
-    //
-    // chats.js now initializes itself.
-    //
-    // We still call initializeChatControls if available,
-    // because this makes app.js compatible with the module.
-    //
-    // chats.js protects against duplicate listeners.
-    // =====================================================
 
     try {
 
@@ -3314,6 +4131,7 @@ async function initializeApp() {
 
             window.RAGChats
                 .initializeChatControls();
+
         }
 
     } catch (error) {
@@ -3322,6 +4140,7 @@ async function initializeApp() {
             "Chat controls initialization failed:",
             error
         );
+
     }
 
 
@@ -3339,6 +4158,7 @@ async function initializeApp() {
             "Action buttons initialization failed:",
             error
         );
+
     }
 
 
@@ -3356,6 +4176,7 @@ async function initializeApp() {
             "Upload UI initialization failed:",
             error
         );
+
     }
 
 
@@ -3373,6 +4194,7 @@ async function initializeApp() {
             "Question input initialization failed:",
             error
         );
+
     }
 
 
@@ -3390,14 +4212,12 @@ async function initializeApp() {
             "YouTube UI initialization failed:",
             error
         );
+
     }
 
 
     // =====================================================
     // BACKEND HEALTH
-    // =====================================================
-    //
-    // Do not block app startup.
     // =====================================================
 
     initializeApiHealth();
@@ -3430,6 +4250,7 @@ async function initializeApp() {
             throw new Error(
                 "loadChats() is not available."
             );
+
         }
 
 
@@ -3450,6 +4271,7 @@ async function initializeApp() {
             "Could not load recent chats.",
             true
         );
+
     }
 
 
@@ -3466,9 +4288,6 @@ async function initializeApp() {
 
     try {
 
-        // If a chat was restored, get its documents
-        // directly from backend.
-
         if (
             typeof currentChatId !==
                 "undefined" &&
@@ -3480,6 +4299,7 @@ async function initializeApp() {
         } else {
 
             renderDocumentLibrary();
+
         }
 
 
@@ -3492,6 +4312,7 @@ async function initializeApp() {
 
 
         renderDocumentLibrary();
+
     }
 
 
@@ -3507,11 +4328,47 @@ async function initializeApp() {
 
         window.RAGChats
             .highlightCurrentChat();
+
     }
 
 
     console.log(
         "✅ Multi-Modal RAG Assistant initialized."
+    );
+
+}
+
+// =========================================================
+// SIDEBAR TOGGLE
+// =========================================================
+
+function initializeSidebarToggle() {
+    const sidebar =
+        document.getElementById("sidebar");
+
+    const toggleButton =
+        document.getElementById("sidebarToggle");
+
+    if (!sidebar || !toggleButton) {
+        return;
+    }
+
+    toggleButton.addEventListener(
+        "click",
+        () => {
+            const isCollapsed =
+                sidebar.classList.toggle(
+                    "sidebar-collapsed"
+                );
+
+            toggleButton.textContent =
+                isCollapsed ? "›" : "‹";
+
+            toggleButton.title =
+                isCollapsed
+                    ? "Expand sidebar"
+                    : "Collapse sidebar";
+        }
     );
 }
 
@@ -3536,6 +4393,7 @@ if (
 } else {
 
     initializeApp();
+
 }
 
 
@@ -3571,13 +4429,26 @@ window.RAGApp = {
 
     sendQuestion,
 
+    askYouTubeQuestion,
+
     initializeUploadUI,
 
     initializeQuestionInput,
 
     initializeYouTubeUI,
 
+    runDocumentAction,
+
+    runSummarizeAction,
+
+    runCompareAction,
+
+    runQuizAction,
+
+    runFlashcardsAction,
+
     restoreSavedChat
+
 };
 
 

@@ -224,21 +224,61 @@ function renderChats(chats) {
         // CHAT TITLE
         // =====================================================
 
-        const title =
-            document.createElement(
-                "span"
-            );
+        // =====================================================
+// CHAT ICON
+// =====================================================
 
-        title.className =
-            "chat-item-title";
+const icon =
+    document.createElement(
+        "span"
+    );
 
-        title.textContent =
-            getChatTitleFromObject(chat);
+icon.className =
+    "chat-item-icon";
+
+icon.innerHTML = `
+    <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+    >
+        <path
+            d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5
+               7.8 7.8 0 0 1-3.4-.8L4 19.5
+               l1.3-4.2A7.5 7.5 0 1 1 20 11.5Z"
+        />
+    </svg>
+`;
+
+// =====================================================
+// CHAT TITLE
+// =====================================================
+
+const title =
+    document.createElement(
+        "span"
+    );
+
+title.className =
+    "chat-item-title";
+
+title.textContent =
+    getChatTitleFromObject(chat);
 
 
         chatButton.appendChild(
-            title
-        );
+    icon
+);
+
+chatButton.appendChild(
+    title
+);
 
 
         // =====================================================
@@ -1528,12 +1568,169 @@ function initializeChatControls() {
     }
 }
 
+// =========================================================
+// STEP 6 — SIDEBAR CONTROLS
+// ChatGPT-style desktop collapse + mobile drawer.
+// =========================================================
+
+let sidebarControlsInitialized = false;
+
+function initializeSidebarControls() {
+
+    if (sidebarControlsInitialized) {
+        return;
+    }
+
+    sidebarControlsInitialized = true;
+
+    const sidebar =
+        document.getElementById("sidebar");
+
+    const toggle =
+        document.getElementById("sidebarToggle");
+
+    if (!sidebar || !toggle) {
+        console.warn("Sidebar controls: required elements not found.");
+        return;
+    }
+
+    const mobileBreakpoint = 760;
+
+    function isMobile() {
+        return window.innerWidth <= mobileBreakpoint;
+    }
+
+    function updateToggleIcon() {
+
+        if (isMobile()) {
+
+            toggle.textContent =
+                sidebar.classList.contains("is-mobile-open")
+                    ? "‹"
+                    : "›";
+
+            toggle.title =
+                sidebar.classList.contains("is-mobile-open")
+                    ? "Close sidebar"
+                    : "Open sidebar";
+
+            return;
+        }
+
+        toggle.textContent =
+            sidebar.classList.contains("is-collapsed")
+                ? "›"
+                : "‹";
+
+        toggle.title =
+            sidebar.classList.contains("is-collapsed")
+                ? "Expand sidebar"
+                : "Collapse sidebar";
+    }
+
+    function closeMobileSidebar() {
+
+        if (!isMobile()) {
+            return;
+        }
+
+        sidebar.classList.remove("is-mobile-open");
+
+        document.body.classList.remove(
+            "sidebar-mobile-open"
+        );
+
+        updateToggleIcon();
+    }
+
+    toggle.addEventListener("click", event => {
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (isMobile()) {
+
+            const isOpen =
+                sidebar.classList.toggle(
+                    "is-mobile-open"
+                );
+
+            document.body.classList.toggle(
+                "sidebar-mobile-open",
+                isOpen
+            );
+
+        } else {
+
+            sidebar.classList.toggle(
+                "is-collapsed"
+            );
+        }
+
+        updateToggleIcon();
+    });
+
+    // Clicking outside closes mobile sidebar.
+    document.addEventListener("click", event => {
+
+        if (!isMobile()) {
+            return;
+        }
+
+        if (
+            !document.body.classList.contains(
+                "sidebar-mobile-open"
+            )
+        ) {
+            return;
+        }
+
+        if (sidebar.contains(event.target)) {
+            return;
+        }
+
+        closeMobileSidebar();
+    });
+
+    // Escape closes mobile sidebar.
+    document.addEventListener("keydown", event => {
+
+        if (
+            event.key === "Escape" &&
+            isMobile()
+        ) {
+            closeMobileSidebar();
+        }
+    });
+
+    // Reset mobile state when switching back to desktop.
+    window.addEventListener("resize", () => {
+
+        if (!isMobile()) {
+
+            sidebar.classList.remove(
+                "is-mobile-open"
+            );
+
+            document.body.classList.remove(
+                "sidebar-mobile-open"
+            );
+        }
+
+        updateToggleIcon();
+    });
+
+    updateToggleIcon();
+}
+
 
 // =========================================================
 // INITIALIZE WHEN DOM IS READY
 // =========================================================
 
 function initializeChatsModule() {
+
+    initializeSidebarControls();
 
     initializeChatControls();
 
