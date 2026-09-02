@@ -2428,21 +2428,95 @@ def analyze_youtube_video(
 
     transcript_context = "\n".join(transcript_parts)
 
+
+
     summary_prompt = f"""
-You are summarizing a YouTube video for a RAG assistant.
+You are an intelligent YouTube video analysis assistant.
 
-Create a clear, useful summary using ONLY the supplied transcript.
-Do not use outside knowledge and do not invent details.
+Analyze the video transcript and create a clean, well-organized,
+topic-wise summary.
 
-Include:
-- A short overview of what the video is about.
-- The main topics/concepts in logical order.
-- Important explanations, examples, or conclusions.
-- A concise list of key takeaways.
-- Important timestamps when they are present in the transcript.
+IMPORTANT RULES:
+- Use ONLY information present in the supplied transcript.
+- Do not use outside knowledge.
+- Do not invent events, explanations, or timestamps.
+- Identify the actual major topics discussed instead of mechanically
+  summarizing every sentence.
+- Organize topics in the same logical order as they appear in the video.
+- Merge closely related points into meaningful topics.
+- Keep the explanation informative but easy to scan.
+- Use timestamps only when supported by the transcript.
+- Do NOT use citations such as [Source 1].
+- Do NOT mention that this summary was generated from a transcript.
+- Do NOT repeat the same information across multiple sections.
+- Output clean Markdown only.
 
-Keep the summary reasonably concise so the user can read it in chat,
-but cover the important content rather than summarizing only the beginning.
+Follow this EXACT structure:
+
+# 🎥 Video Analysis
+
+## 📌 Overview
+
+Write a concise 2–4 sentence overview explaining what the video is
+primarily about.
+
+## 🧩 Topics Covered
+
+Identify the major topics naturally discussed in the video.
+
+For each important topic use:
+
+### 1. Topic Name
+
+Give a clear explanation of the topic in 1–3 short paragraphs.
+
+**Key Points:**
+- Important point
+- Important point
+- Important point
+
+**⏱️ Timestamp:** MM:SS
+
+Only include "Key Points" when useful.
+Only include a timestamp when one is clearly supported by the transcript.
+
+Then continue:
+
+### 2. Next Topic Name
+
+...
+
+The number of topics should depend on the actual video.
+Do not force unnecessary topics.
+
+## 💡 Key Takeaways
+
+Provide 3–6 concise bullets containing the most important insights,
+ideas, conclusions, or messages from the video.
+
+## 🕒 Important Moments
+
+List only genuinely important timestamps in this format:
+
+- **MM:SS** — What happens or is discussed
+- **MM:SS** — What happens or is discussed
+
+Do not create this section if meaningful timestamps are unavailable.
+
+## 🎯 Overall Summary
+
+End with a concise 1–2 sentence conclusion capturing the main message
+or purpose of the video.
+
+FORMATTING RULES:
+- Use proper Markdown headings.
+- Leave blank lines between sections.
+- Never output broken formatting such as "####Overview".
+- Never use "---####".
+- Do not start headings with escaped characters.
+- Keep the response visually clean and professional.
+- Avoid excessive repetition.
+- Prioritize topic-wise understanding over a chronological transcript dump.
 
 VIDEO TRANSCRIPT
 =========================================================
