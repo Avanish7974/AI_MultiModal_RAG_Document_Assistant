@@ -4543,7 +4543,7 @@ function showYouTubeVideo(
 
 function hideYouTubeVideo() {
 
-    // currentYouTubeUrl = "";
+    currentYouTubeUrl = "";
 
     const panel =
         $("youtubePanel");

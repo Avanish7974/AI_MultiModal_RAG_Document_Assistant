@@ -1217,7 +1217,6 @@ def ask_documents(
         retrieval_result = retrieve_chunks(
             question,
             collection,
-            top_k=5,
         )
 
     except Exception as e:
